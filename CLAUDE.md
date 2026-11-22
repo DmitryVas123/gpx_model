@@ -57,7 +57,10 @@ in MVP_ROADMAP.md.
     point objects.
 -   Adapters (`gpx`, `persistence`, later DEM/LLM) convert to and from
     domain types.
--   Entry points (`cli`, later `api`) contain no calculations or SQL.
+-   `alpha.persistence` is the only package that imports SQLAlchemy and
+    runs SQL. Use cases in `alpha.application` own their transactions.
+-   Entry points (`cli`, later `api`) contain no calculations or SQL;
+    `cli/render.py` only formats.
 -   Prefer plain functions and dataclasses. Use Strategy (a function
     registry) for scenario methods. No abstract base classes with a
     single implementation.

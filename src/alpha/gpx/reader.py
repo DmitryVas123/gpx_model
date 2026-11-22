@@ -10,6 +10,7 @@ import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
+from importlib.metadata import version
 from typing import Any
 
 import gpxpy
@@ -21,6 +22,10 @@ from alpha.domain.quality import QualityWarning, WarningCode
 from alpha.domain.track import Track
 
 DEFAULT_MAX_BYTES = 50 * 1024 * 1024
+
+# Recorded with every import (provenance).
+PARSER_NAME = "gpxpy"
+PARSER_VERSION = version("gpxpy")
 
 _XML_ENCODING = re.compile(
     rb"""^<\?xml[^>]*?encoding\s*=\s*["']([A-Za-z0-9._-]+)["']"""

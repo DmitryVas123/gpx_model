@@ -33,7 +33,15 @@ Phase exit criteria matter more than dates.
     filter (ADR-010) and a 3D windowed-speed moving rule (ADR-007 rev. 2)
     now match Strava within 0.3 % (distance) and 1 % (moving time).
     Strava's elevation gain cannot be reproduced from exported data
-    (ADR-004). 265 tests, including invariants and golden outputs.
+    (ADR-004).
+-   **Phase 3 done.** SQLite storage with original files kept by SHA-256
+    (`persistence/`, ADR-002), use cases (`application/tracks.py`),
+    comparison (`domain/comparison.py`), and the CLI commands `import`,
+    `list`, `show`, `compare`, `edit` (kind, elevation source, link to
+    plan), `delete --yes`. The CLI is now a package (`cli/app.py`,
+    `cli/render.py`). 344 tests, including persistence round trips,
+    rollback, restart, architecture rules, and the exit-criterion
+    comparison of `input.gpx` with `Nebelhorn_push.gpx`.
 -   `scripts/explore.py` (former `main.py`): plotting sandbox only. Every
     known issue in its calculations is solved in the package (segment
     boundaries, spacing-independent windows, no clipping, timestamps,

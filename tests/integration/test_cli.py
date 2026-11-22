@@ -2,7 +2,14 @@ import io
 import json
 from pathlib import Path
 
-from alpha.cli import EXIT_BAD_PARAMS, EXIT_OK, EXIT_READ_ERROR, main
+from alpha.cli import (
+    EXIT_BAD_PARAMS,
+    EXIT_INVALID,
+    EXIT_NOT_FOUND,
+    EXIT_OK,
+    EXIT_READ_ERROR,
+    main,
+)
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 
@@ -100,3 +107,98 @@ def test_analyse_rejects_invalid_params() -> None:
     )
     assert code == EXIT_BAD_PARAMS
     assert "profile_bin_m" in text
+
+
+# --- stored tracks ---------------------------------------------------------------
+
+
+def run_in(data_dir: Path, *argv: str) -> tuple[int, str]:
+    return run("--data-dir", str(data_dir), *argv)
+
+
+def test_import_list_show_compare(tmp_path: Path) -> None:
+    code, text = run_in(
+        tmp_path,
+        "import",
+        str(FIXTURES / "route_only.gpx"),
+        str(FIXTURES / "activity_two_segments.gpx"),
+    )
+    assert code == EXIT_OK
+    assert text.count(": imported") == 2
+
+    code, text = run_in(tmp_path, "import", str(FIXTURES / "route_only.gpx"))
+    assert "already imported" in text
+
+    code, text = run_in(tmp_path, "list")
+    assert code == EXIT_OK
+    assert "Маршрут к хижине" in text
+    assert "Synthetic activity" in text
+    assert "? = kind guessed" in text
+
+    code, text = run_in(tmp_path, "show", "2")
+    assert code == EXIT_OK
+    assert "Moving time" in text and "SOURCE_SEGMENT_GAP" in text
+
+    code, text = run_in(tmp_path, "compare", "1", "2")
+    assert code == EXIT_OK
+    assert "Moving time" in text and "unknown" in text
+    assert "nothing about conditions" in text
+
+    code, text = run_in(tmp_path, "compare", "1", "2", "--json")
+    data = json.loads(text)
+    assert data["a"]["id"] == 1 and data["b"]["id"] == 2
+    assert (
+        next(m for m in data["metrics"] if m["metric"] == "moving_time_s")["a"] is None
+    )
+
+
+def test_import_reports_unreadable_files(tmp_path: Path) -> None:
+    bad = tmp_path / "bad.gpx"
+    bad.write_bytes(b"nope")
+    code, text = run_in(
+        tmp_path / "data", "import", str(bad), str(FIXTURES / "route_only.gpx")
+    )
+    assert code == EXIT_READ_ERROR
+    assert "INVALID_XML" in text
+    assert "route_only.gpx: imported" in text
+
+
+def test_edit_and_link(tmp_path: Path) -> None:
+    run_in(
+        tmp_path,
+        "import",
+        str(FIXTURES / "route_only.gpx"),
+        str(FIXTURES / "activity_two_segments.gpx"),
+    )
+    code, text = run_in(tmp_path, "edit", "2", "--planned-track", "1")
+    assert code == EXIT_OK and "follows plan #1" in text
+    _, text = run_in(tmp_path, "list")
+    assert "(plan #1)" in text
+
+    code, text = run_in(tmp_path, "edit", "1", "--planned-track", "2")
+    assert code == EXIT_INVALID
+
+    code, text = run_in(tmp_path, "edit", "2", "--elevation-source", "barometric")
+    assert code == EXIT_OK and "barometric (user)" in text
+
+    code, _ = run_in(tmp_path, "edit", "2")
+    assert code == EXIT_BAD_PARAMS
+
+
+def test_delete_needs_yes(tmp_path: Path) -> None:
+    run_in(tmp_path, "import", str(FIXTURES / "route_only.gpx"))
+    code, text = run_in(tmp_path, "delete", "1")
+    assert code == EXIT_OK and "Nothing deleted" in text
+    _, text = run_in(tmp_path, "list")
+    assert "Маршрут к хижине" in text
+
+    code, text = run_in(tmp_path, "delete", "1", "--yes")
+    assert "Deleted route_only.gpx" in text
+    _, text = run_in(tmp_path, "list")
+    assert "No tracks imported yet" in text
+
+
+def test_unknown_track_id(tmp_path: Path) -> None:
+    code, text = run_in(tmp_path, "show", "7")
+    assert code == EXIT_NOT_FOUND
+    assert "no track with id 7" in text

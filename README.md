@@ -1,9 +1,8 @@
 # ALPHA --- Mountain Decision Intelligence
 
 **Language:** Python\
-**Status:** Phase 2 complete (deterministic analysis, `alpha analyse`). Next:
-persistence and comparison (Phase 3); see
-[MVP_ROADMAP.md](MVP_ROADMAP.md) for the current state.
+**Status:** Phase 3 complete (local storage and comparison). Next: the
+duration scenario engine (Phase 4); see [MVP_ROADMAP.md](MVP_ROADMAP.md).
 
 ALPHA analyses GPX planned routes and recorded activities. It
 calculates distance, ascent, gradient and climb sections, compares a
@@ -38,11 +37,26 @@ ruff check . && ruff format --check . && mypy && pytest
 
 ### Command line
 
+Single files, nothing stored:
+
 ``` bash
 alpha inspect FILE.gpx        # tracks, inferred kind/elevation source, data-quality warnings
 alpha analyse FILE.gpx        # distance, ascent, time, gradient distribution, climb sections
 alpha analyse FILE.gpx --json # full versioned report incl. 50 m profile (DATA_MODEL.md §6.1)
 alpha analyse FILE.gpx --moving-min-speed-m-s 0.25 --profile-bin-m 25   # change assumptions
+```
+
+Stored tracks (database and original copies in `data/local/`, or
+`--data-dir DIR` / `ALPHA_DATA_DIR`):
+
+``` bash
+alpha import a.gpx b.gpx      # store and analyse; re-importing identical bytes is a no-op
+alpha list                    # ID, kind (? = guessed), date, distance, ascent, moving time
+alpha show 3 [--json]         # full analysis of a stored track (same options as analyse)
+alpha compare 1 3 [--json]    # track 3 against track 1: metrics, gradient bands, climbs, notes
+alpha edit 3 --planned-track 1             # link an activity to the plan it followed
+alpha edit 1 --kind planned --elevation-source planner_dem   # confirm or correct guesses
+alpha delete 2                # shows what would be deleted; add --yes to delete
 ```
 
 Every result states the algorithm version and a hash of the parameters

@@ -16,14 +16,20 @@ not.
     (pure geodesic math, no I/O).
 -   `gpx`: adapter that turns GPX bytes into domain `Track` objects and
     import warnings. The only module that imports `gpxpy`.
--   `persistence` (Phase 3): SQLite repositories. The only module that
-    imports SQLAlchemy.
--   `application` (Phase 3+): use cases that coordinate domain,
-    adapters, and persistence.
--   `cli` now, `api` later: thin entry points that call use cases.
+-   `persistence`: SQLite schema, repository, and file store. The only
+    package that imports SQLAlchemy.
+-   `application`: use cases that coordinate domain, the GPX adapter, and
+    persistence; each owns its transaction.
+-   `report`: JSON report format (output boundary).
+-   `cli` now, `api` later: thin entry points that call use cases and
+    render results.
 
 Dependencies point inward: `cli/api → application → domain`;
 `gpx/persistence → domain`. Domain never imports adapters.
+`tests/test_architecture.py` enforces: domain imports only stdlib,
+NumPy, pyproj; gpxpy only in `gpx`; SQLAlchemy only in `persistence`;
+`persistence` and `gpx` never import `application`, `cli`, or `report`;
+`application` never imports `cli`.
 
 ## 2. Component diagram
 
@@ -43,12 +49,13 @@ flowchart TD
     App -. post-MVP .-> LLM["Explanation provider"]
 ```
 
-Until Phase 3, the CLI calls domain functions and the gpx adapter
-directly; there is no application layer yet.
+`alpha inspect` and `alpha analyse FILE` still call the GPX adapter and
+domain directly (nothing is stored); every stored-track command goes
+through `application`.
 
 ## 3. Source tree by phase
 
-### Phases 1--2 (analysis core)
+### Current (Phases 1--3)
 
 ``` text
 gpx_model/
@@ -57,36 +64,46 @@ gpx_model/
 │   ├── domain/
 │   │   ├── track.py          # Track and its enums
 │   │   ├── classify.py       # kind / elevation-source heuristics
-│   │   ├── geodesy.py        # step distances
+│   │   ├── geodesy.py        # step distances, jitter filter
 │   │   ├── elevation.py      # hysteresis ascent/descent
 │   │   ├── profile.py        # resampling, profile bins, gradient
 │   │   ├── timing.py         # elapsed/moving/stopped/gaps
 │   │   ├── climbs.py         # climb sections
 │   │   ├── quality.py        # warning detection
-│   │   └── analysis.py       # AnalysisParams, analyse(track, params)
+│   │   ├── analysis.py       # AnalysisParams, analyse(track, params)
+│   │   └── comparison.py     # compare(a, b) -> ComparisonResult
 │   ├── gpx/
-│   │   └── reader.py         # bytes -> list[Track] + warnings
-│   └── cli.py                # `alpha analyse FILE`
+│   │   └── reader.py         # bytes -> tracks + warnings
+│   ├── persistence/
+│   │   ├── schema.py         # SQLAlchemy tables (schema version)
+│   │   ├── repository.py     # Database, Repository, records
+│   │   └── files.py          # FileStore: files/<sha256>.gpx
+│   ├── application/
+│   │   └── tracks.py         # Workspace; import/list/show/compare/edit/delete
+│   ├── report.py             # JSON reports
+│   └── cli/
+│       ├── app.py            # argument parsing, commands, exit codes
+│       └── render.py         # plain-text output
 ├── tests/
 │   ├── fixtures/             # small synthetic GPX, committed
-│   ├── unit/
-│   └── regression/           # golden outputs for reference files
+│   ├── unit/                 # domain only, no database
+│   ├── integration/          # reader, persistence, application, CLI
+│   └── regression/           # golden outputs, exit-criterion checks
 ├── scripts/
 │   └── explore.py            # former main.py; pandas/plotly allowed here
 ├── data/
 │   ├── samples/              # committed, shareable GPX (planned routes)
-│   └── local/                # git-ignored; personal activities, SQLite DB
+│   └── local/                # git-ignored; personal GPX, alpha.db, files/, golden/
 └── docs/adr/
 ```
 
-### Phases 3--5 (added)
+### Phases 4--5 (planned)
 
 ``` text
 src/alpha/
-├── application/              # import_file, analyse_track, compare, scenarios
-├── persistence/              # SQLAlchemy models + repositories
-├── scenarios/                # or domain/scenarios.py: din33466 method
-└── api/                      # FastAPI, Pydantic request/response schemas
+├── domain/scenarios.py       # din33466 method (Phase 4)
+├── application/scenarios.py  # scenario use cases (Phase 4)
+└── api/                      # FastAPI, Pydantic request/response schemas (Phase 5)
 ```
 
 ## 4. Key design decisions
@@ -150,27 +167,38 @@ implementations.
 
 ## 6. Use-case flows
 
-### Import (Phase 3)
+Implemented in `alpha.application.tracks` (ADR-002).
 
-1.  Read bytes; reject files over the size limit (default 50 MB).
-2.  Compute SHA-256; if it exists, return the existing record.
-3.  `gpx.reader` produces tracks and import warnings.
-4.  Infer kind and elevation source heuristically; mark as inferred.
-5.  Copy the file to `data/local/files/<sha256>.gpx`; persist source
-    file, tracks, and points in one transaction.
+### Import
 
-### Analyse
+1.  Compute SHA-256 of the bytes; if it exists, return the existing
+    record (no-op).
+2.  `gpx.reader` parses (size limit 50 MB). Unreadable files raise
+    before anything is written.
+3.  Copy the original to `<data dir>/files/<sha256>.gpx`.
+4.  One transaction: source file, tracks with inferred kind/elevation
+    source, points, and the default analysis. On failure the new copy is
+    removed.
 
-1.  Load track; build `AnalysisParams` (defaults or user overrides).
-2.  Return a cached analysis if `(track, algorithm_version, params_hash)`
-    exists; otherwise call `analyse` and persist.
+### Show / list
+
+1.  Load the track; look up the analysis for `(track, ALGORITHM_VERSION,
+    params_hash)`.
+2.  If missing, call `analyse` and cache it.
 
 ### Compare
 
-1.  Ensure both tracks have analyses with the same version and params
-    hash (recompute if needed).
-2.  Build `ComparisonResult` from summaries, gradient distributions, and
-    climb sections. Not persisted.
+1.  Analyse both tracks with the same params (cached or computed).
+2.  `domain.comparison.compare` builds the `ComparisonResult`. Not
+    persisted.
+
+### Edit / delete
+
+-   Edit stores user corrections (`inferred_by = user`), validates links
+    (activity → planned route), and drops cached analyses on kind or
+    elevation-source changes.
+-   Delete removes a whole source file with its tracks and the stored
+    copy, only when confirmed.
 
 ### Scenarios
 
@@ -183,7 +211,7 @@ implementations.
 
 -   Python 3.12+, `pyproject.toml`, virtual environment
 -   gpxpy, NumPy, pyproj
--   SQLAlchemy 2.x + SQLite (Phase 3)
+-   SQLAlchemy 2.x + SQLite (ADR-002)
 -   FastAPI + Pydantic v2 (Phase 5)
 -   pytest, Ruff, mypy or pyright
 -   pandas, plotly: exploration scripts only
@@ -251,6 +279,7 @@ Example scenario request:
 Written (accepted):
 
 -   ADR-001: modular monolith; layers introduced per phase.
+-   ADR-002: SQLite, original files by hash, cached analyses, integer IDs.
 -   ADR-004: ascent/descent by hysteresis, 3 m for all sources.
 -   ADR-007: moving time by 3D windowed speed (rev. 2, Strava-calibrated).
 -   ADR-008: column-oriented `Track` with NumPy; pandas outside domain.
@@ -259,7 +288,6 @@ Written (accepted):
 
 Planned:
 
--   ADR-002: SQLite first; PostGIS only for spatial queries (Phase 3).
 -   ADR-003: GPX (`trk` and `rte`) as the only input format for MVP.
 -   ADR-005: scenario method `din33466` and its units (Phase 4).
 -   ADR-006: when to introduce background workers.

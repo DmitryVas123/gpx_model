@@ -11,6 +11,8 @@ from dataclasses import fields
 from typing import Any
 
 from alpha.domain.analysis import Analysis, TrackSummary
+from alpha.domain.climbs import ClimbSection
+from alpha.domain.comparison import ComparisonResult
 from alpha.domain.quality import QualityWarning
 from alpha.domain.track import Track
 from alpha.gpx.reader import GpxDocument, SourceTrack
@@ -98,19 +100,7 @@ def track_report(track: Track, analysis: Analysis) -> dict[str, Any]:
             band: _round(metres, 1)
             for band, metres in analysis.gradient_distribution.items()
         },
-        "climb_sections": [
-            {
-                "direction": str(c.direction),
-                "start_distance_m": _round(c.start_distance_m, 1),
-                "end_distance_m": _round(c.end_distance_m, 1),
-                "elevation_change_m": _round(c.elevation_change_m, 1),
-                "mean_gradient_percent": _round(c.mean_gradient_percent, 2),
-                "max_bin_gradient_percent": _round(c.max_bin_gradient_percent, 2),
-                "start_bin": c.start_bin,
-                "end_bin": c.end_bin,
-            }
-            for c in analysis.climbs
-        ],
+        "climb_sections": [_climb_report(c) for c in analysis.climbs],
         "profile": [
             {
                 "index": b.index,
@@ -171,3 +161,78 @@ def file_report(
 
 def to_json(report: dict[str, Any]) -> str:
     return json.dumps(report, ensure_ascii=False, indent=2, allow_nan=False) + "\n"
+
+
+def _climb_report(c: ClimbSection | None) -> dict[str, Any] | None:
+    if c is None:
+        return None
+    return {
+        "direction": str(c.direction),
+        "start_distance_m": _round(c.start_distance_m, 1),
+        "end_distance_m": _round(c.end_distance_m, 1),
+        "elevation_change_m": _round(c.elevation_change_m, 1),
+        "mean_gradient_percent": _round(c.mean_gradient_percent, 2),
+        "max_bin_gradient_percent": _round(c.max_bin_gradient_percent, 2),
+        "start_bin": c.start_bin,
+        "end_bin": c.end_bin,
+    }
+
+
+def stored_track_ref(
+    track_id: int, source_filename: str, planned_track_id: int | None
+) -> dict[str, Any]:
+    return {
+        "id": track_id,
+        "source_filename": source_filename,
+        "planned_track_id": planned_track_id,
+    }
+
+
+def comparison_report(
+    ref_a: dict[str, Any], ref_b: dict[str, Any], result: ComparisonResult
+) -> dict[str, Any]:
+    """B compared against A. Unknown values are null, never zero."""
+
+    def decimals(metric: str) -> int:
+        return SUMMARY_UNITS[metric][1]
+
+    return {
+        "format_version": REPORT_FORMAT_VERSION,
+        "a": ref_a,
+        "b": ref_b,
+        "analysis": {
+            "algorithm_version": result.algorithm_version,
+            "params_hash": result.params_hash,
+        },
+        "metrics": [
+            {
+                "metric": d.metric,
+                "unit": SUMMARY_UNITS[d.metric][0],
+                "a": _round(d.a, decimals(d.metric)),
+                "b": _round(d.b, decimals(d.metric)),
+                "delta": _round(d.delta, decimals(d.metric)),
+                "ratio": _round(d.ratio, 4),
+                "material": d.material,
+            }
+            for d in result.metrics
+        ],
+        "gradient_bands_m": [
+            {
+                "band": b.band,
+                "a": _round(b.a_m, 1),
+                "b": _round(b.b_m, 1),
+                "delta": _round(b.delta_m, 1),
+                "material": b.material,
+            }
+            for b in result.bands
+        ],
+        "biggest_climb": {
+            "a": _climb_report(result.biggest_climb_a),
+            "b": _climb_report(result.biggest_climb_b),
+        },
+        "steepest_climb": {
+            "a": _climb_report(result.steepest_climb_a),
+            "b": _climb_report(result.steepest_climb_b),
+        },
+        "notes": list(result.notes),
+    }

@@ -69,4 +69,11 @@ changes distance by only 0.05–0.10 %.
     Real stationary 1 Hz noise on the reference files stays within the
     threshold, but a poor-fix recording may not.
 -   Very tight switchbacks (turns shorter than 3 m) are slightly cut.
+-   **Recorded gradients rose as expected.** The steepest 50 m bin of
+    Nebelhorn_push went from 38 % (0.1.0) to 56 % (0.2.0). That bin climbs
+    28 m in 185 s near 2,150 m; its jittery raw path is 73 m and the
+    straight line 41 m, so 50 m of filtered distance is plausible. The
+    planned route to the same summit peaks at 48–49 %. The sensitivity is
+    real (2 m filter: 47 %, 5 m: 58 %), so single-bin maxima on recorded
+    tracks should be read as approximate.
 -   Revisit with GPS-only (non-barometric) recordings and other devices.

@@ -62,3 +62,33 @@ def test_gpxpy_only_imported_by_gpx_adapter(path: Path) -> None:
         assert module.split(".")[0] != "gpxpy", (
             f"{path.relative_to(SRC)}: gpxpy may only be imported in alpha.gpx"
         )
+
+
+@pytest.mark.parametrize("path", _python_files(SRC), ids=lambda p: p.name)
+def test_sqlalchemy_only_imported_by_persistence(path: Path) -> None:
+    if (SRC / "persistence") in path.parents:
+        return
+    for module, _ in _imports(path):
+        assert module.split(".")[0] != "sqlalchemy", (
+            f"{path.relative_to(SRC)}: sqlalchemy may only be imported in "
+            "alpha.persistence"
+        )
+
+
+# Inner layers must not depend on outer ones (ARCHITECTURE.md §1).
+FORBIDDEN_LAYER_IMPORTS = {
+    "persistence": ("alpha.application", "alpha.cli", "alpha.gpx", "alpha.report"),
+    "gpx": ("alpha.application", "alpha.cli", "alpha.persistence", "alpha.report"),
+    "application": ("alpha.cli",),
+}
+
+
+@pytest.mark.parametrize("layer", sorted(FORBIDDEN_LAYER_IMPORTS))
+def test_layers_do_not_import_outer_layers(layer: str) -> None:
+    forbidden = FORBIDDEN_LAYER_IMPORTS[layer]
+    for path in _python_files(SRC / layer):
+        for module, level in _imports(path):
+            assert level == 0, f"{path.name}: use absolute imports across layers"
+            assert not module.startswith(forbidden), (
+                f"alpha.{layer}/{path.name} must not import {module}"
+            )

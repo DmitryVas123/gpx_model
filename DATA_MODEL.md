@@ -345,34 +345,54 @@ JSON with `format_version: "2"` (2 added `distance_raw_m` and renamed
 
 ### 7.1 Comparison
 
+Implemented in `alpha.domain.comparison.compare(track_a, analysis_a,
+track_b, analysis_b)`; B is compared against A. Both analyses must share
+`algorithm_version` and `params_hash` (otherwise `ValueError`); the
+application layer analyses both tracks with the same params, so this
+always holds there.
+
 ``` python
 @dataclass(frozen=True)
 class MetricDelta:
-    metric: str                    # e.g. "ascent_m"
+    metric: str                    # TrackSummary field, e.g. "ascent_m"
     a: float | None
     b: float | None
     delta: float | None            # b - a; None if either is unknown
-    ratio: float | None            # b / a; None if a is 0 or unknown
+    ratio: float | None            # b / a; None if either is unknown or a == 0
+    material: bool | None          # None when it cannot be assessed
+
+@dataclass(frozen=True)
+class BandDelta:
+    band: str                      # gradient band label (§5.6)
+    a_m: float
+    b_m: float
+    delta_m: float
+    material: bool
 
 @dataclass(frozen=True)
 class ComparisonResult:
-    track_a_id: str
-    track_b_id: str
     algorithm_version: str
     params_hash: str
-    deltas: tuple[MetricDelta, ...]
-    gradient_distribution_a: dict[str, float]
-    gradient_distribution_b: dict[str, float]
-    steepest_climb_a: ClimbSection | None
+    metrics: tuple[MetricDelta, ...]   # distance, 3D distance, ascent, descent,
+                                       # min/max elevation, elapsed, moving time
+    bands: tuple[BandDelta, ...]       # every band incl. "unknown"
+    biggest_climb_a: ClimbSection | None   # largest net ascent (up sections)
+    biggest_climb_b: ClimbSection | None
+    steepest_climb_a: ClimbSection | None  # highest mean gradient (up sections)
     steepest_climb_b: ClimbSection | None
-    notes: tuple[str, ...]          # e.g. "B has no timestamps; time metrics unknown"
+    notes: tuple[str, ...]
 ```
 
-"Material difference" (Journey C) is reported per metric when
-`|ratio - 1| >= 0.2` or a gradient band differs by ≥ 500 m. These
-thresholds are display hints, not verdicts.
-
-Comparisons are recomputed on demand and not persisted in the MVP.
+-   **"Material"** is a display hint, not a verdict:
+    -   `|ratio − 1| ≥ 0.2` for distances, ascent/descent, and times;
+    -   `|delta| ≥ 200 m` for lowest and highest point;
+    -   `|delta| ≥ 500 m` of distance for a gradient band.
+-   **Notes** always explain unknown values, for example "A: time
+    metrics are unknown (planned route)". They also flag a different
+    elevation source or kind, and always state that differences say
+    nothing about conditions, technical difficulty, or safety.
+-   Comparisons are recomputed on demand and not persisted. Their JSON
+    form is `alpha.report.comparison_report` (`alpha compare --json`).
 
 ### 7.2 Scenario
 
@@ -508,66 +528,75 @@ Used consistently in code, API, and UI (matching PROJECT_VISION.md):
 -   **Unknown:** not available or not inferable: e.g. moving time of a
     planned route. Represented as `None`, never zero.
 
-## 10. Persistence (SQLite, MVP)
+## 10. Persistence (SQLite, MVP; ADR-002)
+
+Implemented in `alpha.persistence.schema` (schema version 1). The data
+directory (default `data/local/`, git-ignored) holds `alpha.db` and
+`files/<sha256>.gpx`, an unmodified copy of every imported file. IDs are
+integers. Times are stored as naive UTC.
 
 ``` text
+meta (schema_version)
 source_files 1 ── * tracks 1 ── * track_points
                     tracks 1 ── * analyses 1 ── * profile_bins
                                  analyses 1 ── * climb_sections
-                                 analyses 1 ── * scenarios
                     tracks (activity) * ── 0..1 tracks (planned)   via planned_track_id
 ```
 
 ### `source_files`
 
--   `id` (UUID), `sha256` (unique; makes imports idempotent),
-    `original_filename`, `stored_path` (relative), `size_bytes`
--   `creator`, `gpx_version`, `parser_name`, `parser_version`
--   `imported_at_utc`
+-   `id`, `sha256` (unique; makes imports idempotent),
+    `original_filename`, `stored_path` (relative to the data dir),
+    `size_bytes`
+-   `creator`, `gpx_version`, `waypoint_count`, `parser_name`,
+    `parser_version`, `warnings_json` (file-level), `imported_at_utc`
 
 ### `tracks`
 
--   `id`, `source_file_id`, `index_in_file`, `gpx_element` (`trk` | `rte`)
+-   `id`, `source_file_id` (cascade), `gpx_element` (`trk` | `rte`),
+    `index_in_element`
 -   `name`, `activity_type`
--   `kind`, `kind_inferred_by`
--   `elevation_source`, `elevation_source_inferred_by`
+-   `kind`, `kind_inferred_by`, `elevation_source`,
+    `elevation_source_inferred_by` (`user` after `alpha edit`)
 -   `planned_track_id` (nullable; set by the user to link an activity to
-    the plan it followed)
+    the plan it followed; set to NULL when the plan is deleted)
 -   `point_count`, `source_segment_count`, `has_elevation`,
-    `has_timestamps`, `started_at_utc`
--   `bbox_min_lat`, `bbox_min_lon`, `bbox_max_lat`, `bbox_max_lon`
+    `has_timestamps`, `started_at_utc`, `read_warnings_json`
 
 ### `track_points` (WITHOUT ROWID, PK `track_id, idx`)
 
 -   `track_id`, `idx`, `source_segment`, `lat_deg`, `lon_deg`,
-    `ele_raw_m`, `time_utc`
+    `ele_raw_m` (NULL = missing), `time_utc_s` (POSIX seconds; NULL =
+    missing)
 
 Relational rows are acceptable at this scale (≈25k points per long
-activity). The original GPX remains the source of truth; points can be
-rebuilt from it.
+activity). The original GPX remains the source of truth.
 
 ### `analyses` (unique `track_id, algorithm_version, params_hash`)
 
--   `id`, `track_id`, `algorithm_version`, `params_json`, `params_hash`
--   summary columns from `TrackSummary`
+-   `id`, `track_id` (cascade), `algorithm_version`, `params_hash`,
+    `params_json`
+-   one column per `TrackSummary` field
 -   `gradient_distribution_json`, `warnings_json`, `created_at_utc`
 
-### `profile_bins`
+A cache: missing rows are computed on demand. Rows are deleted when the
+user edits the track's kind or elevation source.
 
--   `analysis_id`, `bin_index`, `start_distance_m`, `end_distance_m`,
-    `ele_start_m`, `ele_end_m`, `ele_change_m`, `gradient_percent`,
-    `elapsed_s`
+### `profile_bins` (WITHOUT ROWID, PK `analysis_id, bin_index`)
 
-### `climb_sections`
+-   `start_distance_m`, `end_distance_m`, `ele_start_m`, `ele_end_m`,
+    `ele_change_m`, `gradient_percent`, `elapsed_s`
 
--   `analysis_id`, `section_index`, `direction`, `start_distance_m`,
-    `end_distance_m`, `elevation_change_m`, `mean_gradient_percent`,
+### `climb_sections` (WITHOUT ROWID, PK `analysis_id, section_index`)
+
+-   `direction`, `start_distance_m`, `end_distance_m`,
+    `elevation_change_m`, `mean_gradient_percent`,
     `max_bin_gradient_percent`, `start_bin`, `end_bin`
 
-### `scenarios`
+### `scenarios` (Phase 4, not yet created)
 
 -   `id`, `analysis_id`, `method`, `method_version`, `assumptions_json`,
     `results_json`, `created_at_utc`
 
 Deleting a source file cascades to all derived rows and removes the
-stored GPX.
+stored GPX copy.
