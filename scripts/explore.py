@@ -1,17 +1,23 @@
+"""Exploration sandbox (former main.py). Not part of the alpha package.
+
+Usage: python scripts/explore.py [path/to/file.gpx]
+Requires: pip install -e ".[explore]"
+"""
+import sys
+from pathlib import Path
+
 import gpxpy
 import gpxpy.gpx
-import pandas as pd
 import numpy as np
 import pandas as pd
-import seaborn as sns
-import matplotlib.pyplot as plt
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
+DEFAULT_GPX = Path(__file__).resolve().parents[1] / "data" / "samples" / "input2.gpx"
+gpx_path = Path(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_GPX
 
-gpx_file = open('input2.gpx', 'r')
-
-gpx = gpxpy.parse(gpx_file)
+# Read as bytes: text mode on Windows defaults to cp1252 and breaks on non-ASCII names.
+gpx = gpxpy.parse(gpx_path.read_bytes().decode("utf-8"))
 
 rows = []
 

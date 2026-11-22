@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Synthetic activity: two source segments ~556 m apart, 1 s sampling,
+     one 120 s recording gap inside segment 0, one GPS jump inside segment 1. -->
+<gpx version="1.1" creator="alpha-tests" xmlns="http://www.topografix.com/GPX/1/1">
+  <trk>
+    <name>Synthetic activity</name>
+    <type>hiking</type>
+    <trkseg>
+      <trkpt lat="46.0000" lon="8.0"><ele>1000.0</ele><time>2026-01-01T08:00:00Z</time></trkpt>
+      <trkpt lat="46.0001" lon="8.0"><ele>1000.5</ele><time>2026-01-01T08:00:10Z</time></trkpt>
+      <trkpt lat="46.0002" lon="8.0"><ele>1001.0</ele><time>2026-01-01T08:00:20Z</time></trkpt>
+      <trkpt lat="46.0003" lon="8.0"><ele>1001.5</ele><time>2026-01-01T08:02:20Z</time></trkpt>
+    </trkseg>
+    <trkseg>
+      <trkpt lat="46.0053" lon="8.0"><ele>1010.0</ele><time>2026-01-01T08:10:00Z</time></trkpt>
+      <trkpt lat="46.0054" lon="8.0"><ele>1010.5</ele><time>2026-01-01T08:10:10Z</time></trkpt>
+      <trkpt lat="46.0064" lon="8.0"><ele>1011.0</ele><time>2026-01-01T08:10:11Z</time></trkpt>
+      <trkpt lat="46.0065" lon="8.0"><ele>1011.5</ele><time>2026-01-01T08:10:21Z</time></trkpt>
+    </trkseg>
+  </trk>
+</gpx>

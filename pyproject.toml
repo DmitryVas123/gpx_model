@@ -1,0 +1,68 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "alpha-gpx"
+version = "0.0.1"
+description = "ALPHA: deterministic analysis of GPX planned routes and recorded activities"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "gpxpy>=1.6",
+    "numpy>=2.0",
+    "pyproj>=3.6",
+]
+
+[project.scripts]
+alpha = "alpha.cli:main"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.6",
+    "mypy>=1.11",
+]
+# Exploration scripts only (scripts/); never imported by src/alpha.
+explore = [
+    "pandas>=2.2",
+    "plotly>=5.20",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/alpha"]
+
+# --- pytest ---
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+
+# --- ruff ---
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+src = ["src", "tests"]
+# scripts/ is an exploration sandbox and is not held to package standards.
+extend-exclude = ["scripts", "*.md"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",  # pycodestyle
+    "F",       # pyflakes
+    "I",       # isort
+    "B",       # bugbear
+    "UP",      # pyupgrade
+    "N",       # naming
+    "SIM",     # simplify
+    "RUF",     # ruff-specific
+]
+
+# --- mypy ---
+[tool.mypy]
+python_version = "3.12"
+files = ["src", "tests"]
+strict = true
+
+[[tool.mypy.overrides]]
+module = ["gpxpy", "gpxpy.*"]
+ignore_missing_imports = true
