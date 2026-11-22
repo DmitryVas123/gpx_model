@@ -42,6 +42,23 @@ Phase exit criteria matter more than dates.
     `cli/render.py`). 344 tests, including persistence round trips,
     rollback, restart, architecture rules, and the exit-criterion
     comparison of `input.gpx` with `Nebelhorn_push.gpx`.
+-   **Phase 4 done.** Scenario method registry with DIN 33466
+    (`domain/scenarios.py`), assumptions with source (user / preset;
+    `fitted` reserved for Phase 7), speed-multiplier range, breakdown and
+    uncertainty notes. `alpha scenarios ID` shows observed times of the
+    track itself or of linked activities, each with an implied speed
+    multiplier (`application/scenarios.py`, ADR-005). Scenarios are not
+    stored. 378 tests, including monotonicity invariants and the exit
+    criterion on `input.gpx` + `Nebelhorn_push.gpx`.
+-   **Phase 5 done — MVP complete.** FastAPI app in `alpha/api/` (routes
+    call use cases only; Pydantic schemas validate `alpha.report` output
+    with `extra="forbid"`), uniform error format, one JSON log line per
+    request without personal data, local page at `/` (plain JS, inline SVG
+    profile, compare, scenarios, edit/link; no external resources), and
+    `alpha serve` on 127.0.0.1 (ADR-011). 432 tests, including the
+    end-to-end API flow and checks that the page never uses `innerHTML`
+    and loads nothing from the internet. The page itself was checked for
+    JavaScript syntax but not yet rendered in a browser by the assistant.
 -   `scripts/explore.py` (former `main.py`): plotting sandbox only. Every
     known issue in its calculations is solved in the package (segment
     boundaries, spacing-independent windows, no clipping, timestamps,
@@ -202,8 +219,14 @@ Phase exit criteria matter more than dates.
 
 -   Dataset from activities only; profile bins with moving time are the
     natural training rows (gradient → vertical/horizontal speed).
+-   New package `alpha.modelling` (never inside `domain`, ADR-005): reads
+    stored analyses via the application layer and returns
+    `DinAssumptions(source=fitted)` with sample count and error range,
+    which feed the existing `din33466` method unchanged.
 -   First baseline: fit personal DIN parameters from past activities
-    and report their spread; only then try ML.
+    (the implied speed multipliers of Phase 4 are the simplest form) and
+    report their spread; only then try ML. A genuinely different model,
+    such as pace per gradient band, becomes a new registered method.
 -   Route-grouped or chronological validation; report sample count and
     error ranges.
 -   Show "not enough data" until a documented minimum of activities

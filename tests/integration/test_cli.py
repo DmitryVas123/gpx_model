@@ -202,3 +202,59 @@ def test_unknown_track_id(tmp_path: Path) -> None:
     code, text = run_in(tmp_path, "show", "7")
     assert code == EXIT_NOT_FOUND
     assert "no track with id 7" in text
+
+
+# --- scenarios (Phase 4) ------------------------------------------------------------
+
+
+def test_scenarios_text_and_json(tmp_path: Path) -> None:
+    run_in(
+        tmp_path,
+        "import",
+        str(FIXTURES / "route_only.gpx"),
+        str(FIXTURES / "activity_two_segments.gpx"),
+    )
+    run_in(tmp_path, "edit", "2", "--planned-track", "1")
+
+    code, text = run_in(tmp_path, "scenarios", "1", "--break-min", "30")
+    assert code == EXIT_OK
+    assert "ESTIMATES" in text
+    assert "preset: DIN 33466 standard" in text
+    assert "breaks 0:30 h" in text
+    assert "baseline" in text and "faster" in text and "slower" in text
+    assert "Observed (recorded activity times, not estimates)" in text
+    assert "linked activity" in text
+
+    code, text = run_in(
+        tmp_path, "scenarios", "1", "--horizontal-speed-km-h", "5", "--json"
+    )
+    data = json.loads(text)
+    assert data["provenance"] == "estimated"
+    assert data["assumptions"]["source"] == "user"
+    assert data["assumptions"]["horizontal_speed_m_h"] == 5000.0
+    assert data["observed"][0]["provenance"] == "observed"
+    assert [s["label"] for s in data["scenarios"]] == ["faster", "baseline", "slower"]
+
+
+def test_scenarios_rejects_bad_input(tmp_path: Path) -> None:
+    run_in(tmp_path, "import", str(FIXTURES / "route_only.gpx"))
+    code, _ = run_in(tmp_path, "scenarios", "1", "--ascent-rate-m-h", "0")
+    assert code == EXIT_BAD_PARAMS
+    code, _ = run_in(tmp_path, "scenarios", "1", "--speed-multipliers", "1,-2")
+    assert code == EXIT_BAD_PARAMS
+    code, _ = run_in(tmp_path, "scenarios", "9")
+    assert code == EXIT_NOT_FOUND
+
+
+def test_scenarios_need_elevation(tmp_path: Path) -> None:
+    no_ele = tmp_path / "no_ele.gpx"
+    no_ele.write_text(
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<gpx version="1.1" creator="t" xmlns="http://www.topografix.com/GPX/1/1">'
+        '<rte><rtept lat="46.0" lon="8.0"/><rtept lat="46.01" lon="8.0"/></rte></gpx>',
+        encoding="utf-8",
+    )
+    run_in(tmp_path / "data", "import", str(no_ele))
+    code, text = run_in(tmp_path / "data", "scenarios", "1")
+    assert code == EXIT_INVALID
+    assert "ascent and descent are unknown" in text

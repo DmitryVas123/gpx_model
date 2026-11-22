@@ -42,8 +42,8 @@ in MVP_ROADMAP.md.
 -   gpxpy for parsing (only inside `alpha.gpx`).
 -   NumPy for domain calculations; pyproj for geodesic distance.
 -   pandas, plotly, seaborn: allowed only in `scripts/` for exploration.
--   SQLAlchemy 2.x + SQLite from Phase 3; FastAPI + Pydantic v2 from
-    Phase 5, at the API boundary only.
+-   SQLAlchemy 2.x + SQLite (persistence); FastAPI + Pydantic v2 +
+    uvicorn at the API boundary only.
 -   pytest, Ruff, mypy or pyright.
 -   No LangChain, LlamaIndex, agent frameworks, or LLM calls in the MVP.
 
@@ -59,11 +59,19 @@ in MVP_ROADMAP.md.
     domain types.
 -   `alpha.persistence` is the only package that imports SQLAlchemy and
     runs SQL. Use cases in `alpha.application` own their transactions.
--   Entry points (`cli`, later `api`) contain no calculations or SQL;
-    `cli/render.py` only formats.
+-   Entry points (`cli`, `api`) contain no calculations or SQL;
+    `cli/render.py` only formats. FastAPI, Pydantic, Starlette, and
+    uvicorn are imported only in `alpha.api`. JSON is built only in
+    `alpha.report`; API schemas mirror it with `extra="forbid"`.
+-   The web page (`api/static/index.html`) inserts server data with
+    `textContent` only and loads no external resources.
 -   Prefer plain functions and dataclasses. Use Strategy (a function
     registry) for scenario methods. No abstract base classes with a
     single implementation.
+-   Scenario **methods** (formulas) live in `domain.scenarios`;
+    **assumptions** carry their source (`user`, `preset`, `fitted`).
+    Fitting and ML belong in a separate `alpha.modelling` package, never
+    in `alpha.domain` (ADR-005).
 
 ## 5. Data and calculation rules
 

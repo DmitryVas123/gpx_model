@@ -55,7 +55,7 @@ through `application`.
 
 ## 3. Source tree by phase
 
-### Current (Phases 1--3)
+### Current (MVP, Phases 1--5)
 
 ``` text
 gpx_model/
@@ -71,7 +71,8 @@ gpx_model/
 │   │   ├── climbs.py         # climb sections
 │   │   ├── quality.py        # warning detection
 │   │   ├── analysis.py       # AnalysisParams, analyse(track, params)
-│   │   └── comparison.py     # compare(a, b) -> ComparisonResult
+│   │   ├── comparison.py     # compare(a, b) -> ComparisonResult
+│   │   └── scenarios.py      # method registry, din33466, assumptions
 │   ├── gpx/
 │   │   └── reader.py         # bytes -> tracks + warnings
 │   ├── persistence/
@@ -79,15 +80,21 @@ gpx_model/
 │   │   ├── repository.py     # Database, Repository, records
 │   │   └── files.py          # FileStore: files/<sha256>.gpx
 │   ├── application/
-│   │   └── tracks.py         # Workspace; import/list/show/compare/edit/delete
-│   ├── report.py             # JSON reports
-│   └── cli/
-│       ├── app.py            # argument parsing, commands, exit codes
-│       └── render.py         # plain-text output
+│   │   ├── tracks.py         # Workspace; import/list/show/compare/edit/delete
+│   │   └── scenarios.py      # estimate_duration + observed times
+│   ├── report.py             # JSON reports (shared by CLI and API)
+│   ├── cli/
+│   │   ├── app.py            # argument parsing, commands, exit codes
+│   │   └── render.py         # plain-text output
+│   └── api/
+│       ├── app.py            # FastAPI routes, error handlers, request log
+│       ├── schemas.py        # Pydantic response/request models
+│       ├── server.py         # uvicorn runner (`alpha serve`)
+│       └── static/index.html # local page: plain JS + inline SVG
 ├── tests/
 │   ├── fixtures/             # small synthetic GPX, committed
 │   ├── unit/                 # domain only, no database
-│   ├── integration/          # reader, persistence, application, CLI
+│   ├── integration/          # reader, persistence, application, CLI, API
 │   └── regression/           # golden outputs, exit-criterion checks
 ├── scripts/
 │   └── explore.py            # former main.py; pandas/plotly allowed here
@@ -97,13 +104,12 @@ gpx_model/
 └── docs/adr/
 ```
 
-### Phases 4--5 (planned)
+### Planned
 
 ``` text
 src/alpha/
-├── domain/scenarios.py       # din33466 method (Phase 4)
-├── application/scenarios.py  # scenario use cases (Phase 4)
-└── api/                      # FastAPI, Pydantic request/response schemas (Phase 5)
+└── modelling/                # Phase 7: fit assumptions from history; ML lives here,
+                              # never in domain (ADR-005)
 ```
 
 ## 4. Key design decisions
@@ -137,9 +143,13 @@ the reference files make such changes visible.
 
 ### 4.5 Scenario methods as strategies
 
-Each duration method is a pure function with its own assumptions type
-(`din33466` first). A method registry maps names to functions. No class
-hierarchy is needed.
+A **method** is a pure formula registered by name in
+`domain.scenarios.SCENARIO_METHODS` (`din33466` first). **Assumptions**
+are inputs that record their source: `user`, `preset`, or `fitted`. A
+personal model therefore usually supplies assumptions to an existing
+method rather than replacing it. Fitting and any ML live in a separate
+`alpha.modelling` package (Phase 7) that depends on the domain, never the
+other way round (ADR-005). No class hierarchy is needed.
 
 ### 4.6 Reading GPX
 
@@ -202,8 +212,13 @@ Implemented in `alpha.application.tracks` (ADR-002).
 
 ### Scenarios
 
-1.  Load analysis; validate assumptions for the chosen method.
-2.  Compute the range of scenarios with full breakdown; persist.
+1.  Load the cached (or compute the) analysis; validated assumptions
+    come from the caller (preset or user).
+2.  Apply the registered method once per speed multiplier; result with
+    breakdown and notes.
+3.  Add observed times: the track's own if it is an activity, and those
+    of every activity linked to it, each with its implied speed
+    multiplier. Not persisted (ADR-005).
 
 ## 7. Technology
 
@@ -219,45 +234,49 @@ Implemented in `alpha.application.tracks` (ADR-002).
 ### Later
 
 -   Rasterio/GDAL for DEM sampling; PostGIS if spatial queries appear
--   scikit-learn for personal performance baselines
+-   scikit-learn for personal performance baselines, only inside
+    `alpha.modelling` (ADR-005)
 -   React + MapLibre UI
 -   LLM provider behind an adapter, opt-in
 
-## 8. API sketch (Phase 5)
+## 8. HTTP API (ADR-011)
 
--   `GET /health`
--   `POST /files` (upload GPX) → source file + tracks
--   `GET /tracks`, `GET /tracks/{id}`
--   `PATCH /tracks/{id}` (set kind, elevation source, planned_track_id)
--   `GET /tracks/{id}/analysis?profile_bin_m=50&...`
--   `POST /comparisons` `{track_a_id, track_b_id}`
--   `POST /tracks/{id}/scenarios`
+`alpha serve` (default `127.0.0.1:8000`) serves the API, OpenAPI docs at
+`/docs`, and the local page at `/`.
 
-Example scenario request:
+| Method and path | Purpose |
+|---|---|
+| `GET /health` | Liveness and version |
+| `POST /files?filename=` | Import GPX sent as raw body (201 new / 200 already imported) |
+| `GET /tracks` | Stored tracks with summaries |
+| `GET /tracks/{id}` | Full analysis; analysis params as query parameters |
+| `PATCH /tracks/{id}` | `{kind, elevation_source, planned_track_id, clear_planned_track}` |
+| `DELETE /tracks/{id}/source-file[?dry_run=true]` | Delete the source file and its tracks |
+| `GET /comparisons?a=&b=` | Compare b against a |
+| `GET /tracks/{id}/scenarios` | DIN 33466 range + observed times |
 
-``` json
-{
-  "method": "din33466",
-  "assumptions": {
-    "horizontal_speed_m_h": 4000,
-    "ascent_rate_m_h": 300,
-    "descent_rate_m_h": 500,
-    "break_s": 1800,
-    "preset_name": "DIN 33466 standard"
-  },
-  "speed_multipliers": [0.8, 1.0, 1.2]
-}
-```
+Scenario query parameters:
+
+-   `horizontal_speed_km_h`, `ascent_rate_m_h`, `descent_rate_m_h` (empty
+    = DIN 33466 standard preset);
+-   `break_min`, `delay_min`;
+-   `speed_multiplier` (repeatable).
+
+Errors are always `{"error": {"code", "message", "details?"}}` with
+404 / 409 / 413 / 422 (ADR-011).
 
 ## 9. Reliability and observability
 
--   Structured logs with track ID and operation; never coordinates.
+-   One structured JSON log line per HTTP request (operation ID, method,
+    path, status, duration); never bodies, query strings, file names, or
+    coordinates.
 -   Idempotent import by SHA-256.
 -   Raw and processed elevation are separate arrays and columns.
 -   Regression tests pin outputs for the reference GPX files.
 -   Warnings returned whenever source data is incomplete.
--   No background workers: a 25k-point analysis is expected to take well
-    under a second. Revisit only with a measurement (ADR-006).
+-   No background workers: a 25k-point import with analysis takes about
+    0.6 s and requests take milliseconds. Revisit only with a measurement
+    (ADR-011).
 
 ## 10. Security and privacy
 
@@ -270,6 +289,8 @@ Example scenario request:
 -   External LLM calls (post-MVP) are opt-in and receive computed
     metrics, not raw coordinates.
 -   Deleting a source file removes all derived rows and the stored copy.
+-   The API binds to localhost by default and has no authentication; the
+    web page loads nothing from the internet and inserts data as text only.
 -   Document licences and attribution for map and elevation data.
 
 ## 11. Architecture decision records
@@ -284,10 +305,10 @@ Written (accepted):
 -   ADR-007: moving time by 3D windowed speed (rev. 2, Strava-calibrated).
 -   ADR-008: column-oriented `Track` with NumPy; pandas outside domain.
 -   ADR-009: 50 m profile bins, no clipping, gradient bands, climbs.
+-   ADR-005: scenario methods vs assumption sources; ML outside domain.
 -   ADR-010: jitter-filtered distance (3 m minimum displacement).
+-   ADR-011: HTTP API, error format, logging, local page; no workers.
 
 Planned:
 
 -   ADR-003: GPX (`trk` and `rte`) as the only input format for MVP.
--   ADR-005: scenario method `din33466` and its units (Phase 4).
--   ADR-006: when to introduce background workers.

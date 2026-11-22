@@ -116,10 +116,10 @@ def import_file(
 
 
 def _records(repo: Repository, track_ids: tuple[int, ...]) -> tuple[TrackRecord, ...]:
-    return tuple(_require(repo, track_id) for track_id in track_ids)
+    return tuple(require_track(repo, track_id) for track_id in track_ids)
 
 
-def _require(repo: Repository, track_id: int) -> TrackRecord:
+def require_track(repo: Repository, track_id: int) -> TrackRecord:
     record = repo.get_track(track_id)
     if record is None:
         raise TrackNotFoundError(track_id)
@@ -129,7 +129,7 @@ def _require(repo: Repository, track_id: int) -> TrackRecord:
 # --- reading ----------------------------------------------------------------------
 
 
-def _analysis(
+def analysis_for(
     repo: Repository, track_id: int, params: AnalysisParams
 ) -> tuple[Track, Analysis]:
     track = repo.load_track(track_id)
@@ -158,7 +158,7 @@ def list_tracks(
         for record in repo.list_tracks():
             summary = summaries.get(record.id)
             if summary is None:
-                summary = _analysis(repo, record.id, p)[1].summary
+                summary = analysis_for(repo, record.id, p)[1].summary
             items.append(TrackListItem(record, summary))
     return items
 
@@ -174,8 +174,8 @@ def show_track(
     ws: Workspace, track_id: int, params: AnalysisParams | None = None
 ) -> TrackView:
     with ws.db.transaction() as repo:
-        record = _require(repo, track_id)
-        track, analysis = _analysis(repo, track_id, params or AnalysisParams())
+        record = require_track(repo, track_id)
+        track, analysis = analysis_for(repo, track_id, params or AnalysisParams())
     return TrackView(record, track, analysis)
 
 
@@ -192,9 +192,9 @@ def compare_tracks(
     """Compare B against A under one parameter set (both analysed alike)."""
     p = params or AnalysisParams()
     with ws.db.transaction() as repo:
-        record_a, record_b = _require(repo, track_a), _require(repo, track_b)
-        t_a, a_a = _analysis(repo, track_a, p)
-        t_b, a_b = _analysis(repo, track_b, p)
+        record_a, record_b = require_track(repo, track_a), require_track(repo, track_b)
+        t_a, a_a = analysis_for(repo, track_a, p)
+        t_b, a_b = analysis_for(repo, track_b, p)
     return TrackComparison(record_a, record_b, compare(t_a, a_a, t_b, a_b))
 
 
@@ -219,12 +219,12 @@ def edit_track(
     if planned_track_id is not None and clear_planned_track:
         raise InvalidEditError("cannot set and clear the planned track at once")
     with ws.db.transaction() as repo:
-        record = _require(repo, track_id)
+        record = require_track(repo, track_id)
         new_kind = kind or record.kind
         if planned_track_id is not None:
             if planned_track_id == track_id:
                 raise InvalidEditError("a track cannot be linked to itself")
-            target = _require(repo, planned_track_id)
+            target = require_track(repo, planned_track_id)
             if target.kind is not TrackKind.PLANNED:
                 raise InvalidEditError(
                     f"track {planned_track_id} is '{target.kind}', not 'planned'; "
@@ -246,7 +246,7 @@ def edit_track(
         )
         if kind is not None or elevation_source is not None:
             repo.delete_analyses(track_id)
-        return _require(repo, track_id)
+        return require_track(repo, track_id)
 
 
 # --- deleting -----------------------------------------------------------------------
@@ -269,7 +269,7 @@ def delete_source_of_track(
     activities to these tracks are cleared. Without ``confirm`` nothing is
     deleted and the plan is returned for display."""
     with ws.db.transaction() as repo:
-        record = _require(repo, track_id)
+        record = require_track(repo, track_id)
         source = repo.get_source_file(record.source_file_id)
         plan = DeletionPlan(
             source_file_id=source.id,

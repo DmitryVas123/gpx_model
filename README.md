@@ -1,8 +1,8 @@
 # ALPHA --- Mountain Decision Intelligence
 
 **Language:** Python\
-**Status:** Phase 3 complete (local storage and comparison). Next: the
-duration scenario engine (Phase 4); see [MVP_ROADMAP.md](MVP_ROADMAP.md).
+**Status:** MVP complete (Phases 0–5): CLI, local HTTP API, and web page.
+Next: post-MVP phases; see [MVP_ROADMAP.md](MVP_ROADMAP.md).
 
 ALPHA analyses GPX planned routes and recorded activities. It
 calculates distance, ascent, gradient and climb sections, compares a
@@ -56,8 +56,21 @@ alpha show 3 [--json]         # full analysis of a stored track (same options as
 alpha compare 1 3 [--json]    # track 3 against track 1: metrics, gradient bands, climbs, notes
 alpha edit 3 --planned-track 1             # link an activity to the plan it followed
 alpha edit 1 --kind planned --elevation-source planner_dem   # confirm or correct guesses
+alpha scenarios 1 --break-min 30          # DIN 33466 estimate range + observed times
+alpha scenarios 1 --horizontal-speed-km-h 5 --ascent-rate-m-h 500   # your own assumptions
 alpha delete 2                # shows what would be deleted; add --yes to delete
 ```
+
+### Local web page and API
+
+``` bash
+alpha serve                   # http://127.0.0.1:8000  (page at /, API docs at /docs)
+```
+
+The page imports files, lists tracks, draws the elevation and gradient
+profile, edits and links tracks, compares two tracks, and shows duration
+scenarios. It works offline and loads nothing from the internet. The API
+has no authentication, so keep it on `127.0.0.1` (ADR-011).
 
 Every result states the algorithm version and a hash of the parameters
 used; results are comparable only when both match. Metric definitions

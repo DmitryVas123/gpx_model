@@ -79,7 +79,7 @@ def test_sqlalchemy_only_imported_by_persistence(path: Path) -> None:
 FORBIDDEN_LAYER_IMPORTS = {
     "persistence": ("alpha.application", "alpha.cli", "alpha.gpx", "alpha.report"),
     "gpx": ("alpha.application", "alpha.cli", "alpha.persistence", "alpha.report"),
-    "application": ("alpha.cli",),
+    "application": ("alpha.cli", "alpha.api", "alpha.report"),
 }
 
 
@@ -92,3 +92,16 @@ def test_layers_do_not_import_outer_layers(layer: str) -> None:
             assert not module.startswith(forbidden), (
                 f"alpha.{layer}/{path.name} must not import {module}"
             )
+
+
+WEB_PACKAGES = ("fastapi", "pydantic", "starlette", "uvicorn")
+
+
+@pytest.mark.parametrize("path", _python_files(SRC), ids=lambda p: p.name)
+def test_web_frameworks_only_in_api(path: Path) -> None:
+    if (SRC / "api") in path.parents:
+        return
+    for module, _ in _imports(path):
+        assert module.split(".")[0] not in WEB_PACKAGES, (
+            f"{path.relative_to(SRC)}: {module} may only be imported in alpha.api"
+        )

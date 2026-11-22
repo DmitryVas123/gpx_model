@@ -394,39 +394,50 @@ class ComparisonResult:
 -   Comparisons are recomputed on demand and not persisted. Their JSON
     form is `alpha.report.comparison_report` (`alpha compare --json`).
 
-### 7.2 Scenario
+### 7.2 Scenario (ADR-005)
 
-Scenarios use a **named method** (Strategy pattern). The MVP ships one
-published, transparent method; others can be added later.
+Implemented in `alpha.domain.scenarios` (formulas, registry) and
+`alpha.application.scenarios` (observed times). A scenario is always
+**estimated**; the analysis values it uses are **calculated**; recorded
+activity times shown beside it are **observed**.
 
-**Method `din33466`** (German hiking-time standard, also used by Alpine
-clubs):
+**Structure:** analysis + assumptions (with source) → registered method
+→ result. The method is the formula; the assumptions say where its
+numbers come from (`user`, `preset`, or, from Phase 7 and outside the
+domain, `fitted`).
 
--   `t_horizontal = distance_m / horizontal_speed_m_h`
--   `t_vertical = ascent_m / ascent_rate_m_h + descent_m / descent_rate_m_h`
--   `t_moving = max(t_h, t_v) + min(t_h, t_v) / 2`
--   `t_total = t_moving + break_s + delay_s`
+**Method `din33466`** (registry name, version "1"):
 
-The published standard values (4 km/h, 300 m/h up, 500 m/h down) are a
-**labelled preset**, not a default truth. Users set their own values.
+-   `horizontal_s = distance_m / horizontal_speed_m_h * 3600`
+-   `vertical_s = (ascent_m / ascent_rate_m_h + descent_m / descent_rate_m_h) * 3600`
+-   `moving_s = max(h, v) + min(h, v) / 2`
+-   `total_s = moving_s + break_s + delay_s`
 
-A range is produced by applying explicit multipliers to the speeds
-(user-set; e.g. 0.8 / 1.0 / 1.2). With these defaults the method gives
-≈5.4 h for `input.gpx`, while `Nebelhorn_push.gpx` (a different path to
-the same summit) recorded about 2.5 h moving time (gpxpy's
-moving-time definition, not yet §5.4). This shows how strongly the
-answer depends on assumptions, which is why assumptions are always
-displayed.
+`distance_m` is the jitter-filtered 2D distance (§5.1). If ascent or
+descent is unknown, `ScenarioInputError` is raised; a duration is never
+computed from a missing value.
+
+**Preset** "DIN 33466 standard" = 4000 m/h, 300 m/h up, 500 m/h down,
+source `preset`. These are published reference values for an average
+hiker on marked trails, not personal values. Overriding any speed
+makes the assumptions `user`.
+
+**Range:** each speed multiplier (default 1.2, 1.0, 0.8) scales all three
+speeds. Labels are `faster` / `baseline` / `slower` for a symmetric
+three-value set, otherwise `x<multiplier>`.
 
 ``` python
+class AssumptionSource(StrEnum): USER, PRESET, FITTED
+
 @dataclass(frozen=True)
-class DinAssumptions:
-    horizontal_speed_m_h: float    # > 0
-    ascent_rate_m_h: float         # > 0
-    descent_rate_m_h: float        # > 0
-    break_s: float = 0.0           # >= 0
-    delay_s: float = 0.0           # >= 0
-    preset_name: str | None = None # e.g. "DIN 33466 standard"
+class DinAssumptions:                 # validated: speeds > 0, times >= 0
+    horizontal_speed_m_h: float
+    ascent_rate_m_h: float
+    descent_rate_m_h: float
+    break_s: float = 0.0
+    delay_s: float = 0.0
+    source: AssumptionSource = AssumptionSource.USER
+    label: str | None = None          # e.g. "DIN 33466 standard"
 
 @dataclass(frozen=True)
 class ScenarioBreakdown:
@@ -434,27 +445,57 @@ class ScenarioBreakdown:
     vertical_s: float
     moving_s: float
     break_s: float
-    delay_s: float
+    delay_s: float                    # total_s = moving + break + delay
 
 @dataclass(frozen=True)
 class DurationScenario:
-    label: str                     # "faster" | "baseline" | "slower"
+    label: str
     speed_multiplier: float
     estimated_duration_s: float
     breakdown: ScenarioBreakdown
 
 @dataclass(frozen=True)
+class ScenarioInputs:                 # calculated values used by the method
+    distance_m: float
+    ascent_m: float
+    descent_m: float
+
+@dataclass(frozen=True)
 class ScenarioResult:
-    method: str                    # "din33466"
+    method: str                       # registry name, e.g. "din33466"
     method_version: str
     assumptions: DinAssumptions
-    based_on_analysis: str         # algorithm_version + params_hash
+    algorithm_version: str            # of the analysis used
+    params_hash: str
+    inputs: ScenarioInputs
     scenarios: tuple[DurationScenario, ...]
     uncertainty_notes: tuple[str, ...]
 ```
 
-Invariant tests: lowering any speed never shortens a scenario; adding
-breaks increases it by exactly the break time.
+**Uncertainty notes**:
+
+-   Always: what the estimate does not include.
+-   For a preset: that the values are not personal.
+-   For a range: that it reflects pace only.
+-   With 0 breaks: that no breaks are included.
+-   When the route has distance steeper than 25 %: that steepness beyond
+    total ascent and descent is not modelled.
+
+**Observed times** (application layer):
+
+-   An activity shows its own recorded moving and elapsed time.
+-   A planned route shows those of every activity linked to it.
+-   Each carries an **implied speed multiplier**: DIN baseline moving
+    time on that *activity's own* distance and ascent, divided by its
+    recorded moving time. This is a single reference point, never
+    presented as a personal model.
+
+Scenarios are recomputed on demand and not stored (see §10). JSON:
+`alpha.report.scenario_report` (`alpha scenarios --json`).
+
+Invariant tests: lowering any speed never shortens a scenario; breaks
+and delay add exactly their duration; moving time scales with
+1 / multiplier.
 
 ## 8. Data quality
 
@@ -593,7 +634,7 @@ user edits the track's kind or elevation source.
     `elevation_change_m`, `mean_gradient_percent`,
     `max_bin_gradient_percent`, `start_bin`, `end_bin`
 
-### `scenarios` (Phase 4, not yet created)
+### `scenarios` (deferred; not created, ADR-005)
 
 -   `id`, `analysis_id`, `method`, `method_version`, `assumptions_json`,
     `results_json`, `created_at_utc`

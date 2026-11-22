@@ -8,14 +8,18 @@ import hashlib
 import json
 from collections.abc import Sequence
 from dataclasses import fields
+from datetime import UTC, datetime
 from typing import Any
 
+from alpha.application.scenarios import ObservedTime
 from alpha.domain.analysis import Analysis, TrackSummary
 from alpha.domain.climbs import ClimbSection
 from alpha.domain.comparison import ComparisonResult
 from alpha.domain.quality import QualityWarning
+from alpha.domain.scenarios import ScenarioResult
 from alpha.domain.track import Track
 from alpha.gpx.reader import GpxDocument, SourceTrack
+from alpha.persistence import TrackRecord
 
 # 2: summary gained distance_raw_m; distance_in_stops_m -> distance_while_stopped_m
 REPORT_FORMAT_VERSION = "2"
@@ -236,3 +240,98 @@ def comparison_report(
         },
         "notes": list(result.notes),
     }
+
+
+def scenario_report(
+    ref: dict[str, Any],
+    result: ScenarioResult,
+    observed: Sequence[ObservedTime],
+) -> dict[str, Any]:
+    """Scenario estimates with their assumptions, plus observed times."""
+    a = result.assumptions
+    return {
+        "format_version": REPORT_FORMAT_VERSION,
+        "track": ref,
+        "provenance": "estimated",
+        "method": {"name": result.method, "version": result.method_version},
+        "analysis": {
+            "algorithm_version": result.algorithm_version,
+            "params_hash": result.params_hash,
+        },
+        "assumptions": {
+            "source": str(a.source),
+            "label": a.label,
+            "horizontal_speed_m_h": a.horizontal_speed_m_h,
+            "ascent_rate_m_h": a.ascent_rate_m_h,
+            "descent_rate_m_h": a.descent_rate_m_h,
+            "break_s": a.break_s,
+            "delay_s": a.delay_s,
+        },
+        "inputs": {
+            "provenance": "calculated",
+            "distance_m": _round(result.inputs.distance_m, 1),
+            "ascent_m": _round(result.inputs.ascent_m, 1),
+            "descent_m": _round(result.inputs.descent_m, 1),
+        },
+        "scenarios": [
+            {
+                "label": s.label,
+                "speed_multiplier": s.speed_multiplier,
+                "estimated_duration_s": _round(s.estimated_duration_s, 0),
+                "breakdown_s": {
+                    "horizontal": _round(s.breakdown.horizontal_s, 0),
+                    "vertical": _round(s.breakdown.vertical_s, 0),
+                    "moving": _round(s.breakdown.moving_s, 0),
+                    "break": _round(s.breakdown.break_s, 0),
+                    "delay": _round(s.breakdown.delay_s, 0),
+                },
+            }
+            for s in result.scenarios
+        ],
+        "observed": [
+            {
+                "provenance": "observed",
+                "track_id": o.track_id,
+                "name": o.name,
+                "relation": str(o.relation),
+                "moving_time_s": _round(o.moving_time_s, 0),
+                "elapsed_time_s": _round(o.elapsed_time_s, 0),
+                "implied_speed_multiplier": _round(o.implied_speed_multiplier, 3),
+            }
+            for o in observed
+        ],
+        "uncertainty_notes": list(result.uncertainty_notes),
+    }
+
+
+def _iso(value: datetime | None) -> str | None:
+    return None if value is None else value.astimezone(UTC).isoformat()
+
+
+def record_report(r: TrackRecord) -> dict[str, Any]:
+    """Stored track metadata (no points, no coordinates)."""
+    return {
+        "id": r.id,
+        "source_file_id": r.source_file_id,
+        "source_filename": r.source_filename,
+        "gpx_element": r.gpx_element,
+        "index_in_element": r.index_in_element,
+        "name": r.name,
+        "activity_type": r.activity_type,
+        "kind": {"value": str(r.kind), "inferred_by": str(r.kind_inferred_by)},
+        "elevation_source": {
+            "value": str(r.elevation_source),
+            "inferred_by": str(r.elevation_source_inferred_by),
+        },
+        "planned_track_id": r.planned_track_id,
+        "point_count": r.point_count,
+        "has_elevation": r.has_elevation,
+        "has_timestamps": r.has_timestamps,
+        "started_at_utc": _iso(r.started_at_utc),
+        "imported_at_utc": _iso(r.imported_at_utc),
+        "read_warnings": [warning_report(w) for w in r.read_warnings],
+    }
+
+
+def list_item_report(record: TrackRecord, summary: TrackSummary) -> dict[str, Any]:
+    return {"record": record_report(record), "summary": summary_report(summary)}

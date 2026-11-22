@@ -8,6 +8,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import TextIO
 
+from alpha.application.scenarios import estimate_duration
 from alpha.application.tracks import (
     InvalidEditError,
     TrackNotFoundError,
@@ -21,12 +22,20 @@ from alpha.application.tracks import (
 )
 from alpha.cli import render
 from alpha.domain.analysis import AnalysisParams, analyse
+from alpha.domain.scenarios import (
+    DEFAULT_SPEED_MULTIPLIERS,
+    DIN_33466_STANDARD,
+    DinAssumptions,
+    ScenarioInputError,
+    din_assumptions,
+)
 from alpha.domain.track import ElevationSource, TrackKind
 from alpha.gpx.reader import GpxDocument, GpxReadError, read_gpx
 from alpha.persistence import SchemaMismatchError
 from alpha.report import (
     comparison_report,
     file_report,
+    scenario_report,
     stored_track_ref,
     to_json,
     track_report,
@@ -113,6 +122,45 @@ def _parser() -> argparse.ArgumentParser:
         "--planned-track", type=int, metavar="ID", help="link to the planned route ID"
     )
     link.add_argument("--no-planned-track", action="store_true", help="remove the link")
+
+    sub = command(
+        "scenarios",
+        "estimated duration range (DIN 33466) next to observed times",
+        _scenarios,
+    )
+    sub.add_argument("track_id", type=int)
+    preset = DIN_33466_STANDARD
+    sub.add_argument(
+        "--horizontal-speed-km-h",
+        type=float,
+        help=f"default {preset.horizontal_speed_m_h / 1000:g} (DIN 33466 standard)",
+    )
+    sub.add_argument(
+        "--ascent-rate-m-h",
+        type=float,
+        help=f"default {preset.ascent_rate_m_h:g} (DIN 33466 standard)",
+    )
+    sub.add_argument(
+        "--descent-rate-m-h",
+        type=float,
+        help=f"default {preset.descent_rate_m_h:g} (DIN 33466 standard)",
+    )
+    sub.add_argument("--break-min", type=float, default=0.0, help="default 0")
+    sub.add_argument("--delay-min", type=float, default=0.0, help="default 0")
+    sub.add_argument(
+        "--speed-multipliers",
+        default=",".join(f"{k:g}" for k in DEFAULT_SPEED_MULTIPLIERS),
+        help="comma-separated, applied to all speeds (default %(default)s)",
+    )
+    _add_analysis_options(sub)
+
+    sub = command("serve", "run the HTTP API and the local web page", _serve)
+    sub.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="default 127.0.0.1 (this computer only; the data is personal)",
+    )
+    sub.add_argument("--port", type=int, default=8000, help="default 8000")
 
     sub = command(
         "delete", "delete a stored GPX file and all its tracks (needs --yes)", _delete
@@ -348,6 +396,71 @@ def _edit(args: argparse.Namespace, out: TextIO) -> int:
         return EXIT_OK
 
     return _with_workspace(args, out, action)
+
+
+def _assumptions(args: argparse.Namespace) -> DinAssumptions:
+    return din_assumptions(
+        horizontal_speed_m_h=(
+            None
+            if args.horizontal_speed_km_h is None
+            else args.horizontal_speed_km_h * 1000
+        ),
+        ascent_rate_m_h=args.ascent_rate_m_h,
+        descent_rate_m_h=args.descent_rate_m_h,
+        break_s=args.break_min * 60,
+        delay_s=args.delay_min * 60,
+    )
+
+
+def _multipliers(text: str) -> tuple[float, ...]:
+    try:
+        values = tuple(float(part) for part in text.split(",") if part.strip())
+    except ValueError as exc:
+        raise ValueError(f"invalid --speed-multipliers {text!r}") from exc
+    if not values or any(v <= 0 for v in values):
+        raise ValueError("--speed-multipliers must be positive numbers")
+    return values
+
+
+def _scenarios(args: argparse.Namespace, out: TextIO) -> int:
+    try:
+        params = _params(args)
+        assumptions = _assumptions(args)
+        multipliers = _multipliers(args.speed_multipliers)
+    except ValueError as exc:
+        print(f"error: {exc}", file=out)
+        return EXIT_BAD_PARAMS
+
+    def action(ws: Workspace) -> int:
+        try:
+            view = estimate_duration(
+                ws, args.track_id, assumptions, multipliers, params
+            )
+        except ScenarioInputError as exc:
+            print(f"error: track {args.track_id}: {exc}", file=out)
+            return EXIT_INVALID
+        if args.json:
+            r = view.record
+            ref = stored_track_ref(r.id, r.source_filename, r.planned_track_id)
+            out.write(to_json(scenario_report(ref, view.result, view.observed)))
+            return EXIT_OK
+        render.scenarios(view, out)
+        return EXIT_OK
+
+    return _with_workspace(args, out, action)
+
+
+def _serve(args: argparse.Namespace, out: TextIO) -> int:
+    from alpha.api.server import run  # imported lazily: FastAPI is only needed here
+
+    print(f"ALPHA on http://{args.host}:{args.port}  (data: {args.data_dir})", file=out)
+    if args.host not in ("127.0.0.1", "localhost", "::1"):
+        print(
+            "warning: listening beyond this computer; the API has no authentication",
+            file=out,
+        )
+    run(args.data_dir, args.host, args.port)
+    return EXIT_OK
 
 
 def _delete(args: argparse.Namespace, out: TextIO) -> int:

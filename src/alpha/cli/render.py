@@ -4,12 +4,14 @@ import hashlib
 from collections.abc import Sequence
 from typing import TextIO
 
+from alpha.application.scenarios import ScenarioView
 from alpha.application.tracks import TrackComparison, TrackListItem
 from alpha.domain.analysis import Analysis
 from alpha.domain.climbs import ClimbSection
 from alpha.domain.comparison import MetricDelta
 from alpha.domain.profile import GRADIENT_BANDS, UNKNOWN_BAND
 from alpha.domain.quality import QualityWarning, check_track
+from alpha.domain.scenarios import SCENARIO_METHODS
 from alpha.domain.track import Inference, Track
 from alpha.gpx.reader import GpxDocument, SourceTrack
 from alpha.persistence import TrackRecord
@@ -315,4 +317,73 @@ def comparison(c: TrackComparison, out: TextIO) -> None:
     print(file=out)
     print("  Notes", file=out)
     for note in r.notes:
+        print(f"    - {note}", file=out)
+
+
+# --- scenarios ----------------------------------------------------------------------
+
+
+def scenarios(v: ScenarioView, out: TextIO) -> None:
+    r = v.result
+    a = r.assumptions
+    spec = SCENARIO_METHODS[r.method]
+    print(record_line(v.record), file=out)
+    print(
+        f"method {r.method} v{r.method_version} ({spec.description}); "
+        f"analysis {r.algorithm_version}, params {r.params_hash[:12]}",
+        file=out,
+    )
+    print("All durations below are ESTIMATES from the stated assumptions.", file=out)
+
+    source = f"{a.source}: {a.label}" if a.label else str(a.source)
+    print(file=out)
+    print(f"  Assumptions ({source})", file=out)
+    print(
+        f"    horizontal {a.horizontal_speed_m_h / 1000:g} km/h, "
+        f"ascent {a.ascent_rate_m_h:g} m/h, descent {a.descent_rate_m_h:g} m/h, "
+        f"breaks {hm(a.break_s)}, delay {hm(a.delay_s)}",
+        file=out,
+    )
+    print("  Inputs (calculated from the track)", file=out)
+    print(
+        f"    distance {km(r.inputs.distance_m)}, ascent {m(r.inputs.ascent_m)}, "
+        f"descent {m(r.inputs.descent_m)}",
+        file=out,
+    )
+
+    print(file=out)
+    print(
+        f"  {'Scenario':<10}{'speed':>7}{'horizontal':>12}{'vertical':>10}"
+        f"{'moving':>10}{'breaks+delay':>14}{'total':>10}",
+        file=out,
+    )
+    for s in r.scenarios:
+        b = s.breakdown
+        print(
+            f"  {s.label:<10}{'x' + format(s.speed_multiplier, 'g'):>7}"
+            f"{hm(b.horizontal_s):>12}{hm(b.vertical_s):>10}{hm(b.moving_s):>10}"
+            f"{hm(b.break_s + b.delay_s):>14}{hm(s.estimated_duration_s):>10}",
+            file=out,
+        )
+
+    if v.observed:
+        print(file=out)
+        print("  Observed (recorded activity times, not estimates)", file=out)
+        for o in v.observed:
+            print(
+                f'    #{o.track_id} "{o.name or "(unnamed)"}" ({o.relation}): '
+                f"moving {hm(o.moving_time_s)}, elapsed {hm(o.elapsed_time_s)}",
+                file=out,
+            )
+            if o.implied_speed_multiplier is not None:
+                print(
+                    f"      on its own distance and ascent, the method matches this "
+                    f"moving time at x{o.implied_speed_multiplier:.2f} speed "
+                    "(one activity: a reference point, not a personal model)",
+                    file=out,
+                )
+
+    print(file=out)
+    print("  Notes", file=out)
+    for note in r.uncertainty_notes:
         print(f"    - {note}", file=out)

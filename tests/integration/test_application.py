@@ -176,3 +176,33 @@ def test_reimport_after_delete(ws: Workspace) -> None:
     track_id = import_file(ws, "a.gpx", ACTIVITY).tracks[0].id
     delete_source_of_track(ws, track_id, confirm=True)
     assert import_file(ws, "a.gpx", ACTIVITY).created
+
+
+# --- scenarios (Phase 4) ------------------------------------------------------------
+
+
+def test_scenarios_for_plan_show_linked_activity(ws: Workspace) -> None:
+    from alpha.application.scenarios import ObservedRelation, estimate_duration
+    from alpha.domain.scenarios import DIN_33466_STANDARD
+
+    plan = import_file(ws, "route.gpx", ROUTE).tracks[0].id
+    act = import_file(ws, "activity.gpx", ACTIVITY).tracks[0].id
+    assert estimate_duration(ws, plan, DIN_33466_STANDARD).observed == ()
+
+    edit_track(ws, act, planned_track_id=plan)
+    view = estimate_duration(ws, plan, DIN_33466_STANDARD)
+    (observed,) = view.observed
+    assert observed.track_id == act
+    assert observed.relation is ObservedRelation.LINKED_ACTIVITY
+    assert observed.moving_time_s is not None
+    assert observed.implied_speed_multiplier is not None
+    assert [s.label for s in view.result.scenarios] == ["faster", "baseline", "slower"]
+
+
+def test_scenarios_for_activity_show_its_own_time(ws: Workspace) -> None:
+    from alpha.application.scenarios import ObservedRelation, estimate_duration
+    from alpha.domain.scenarios import DIN_33466_STANDARD
+
+    act = import_file(ws, "activity.gpx", ACTIVITY).tracks[0].id
+    (observed,) = estimate_duration(ws, act, DIN_33466_STANDARD).observed
+    assert observed.relation is ObservedRelation.SAME_TRACK
