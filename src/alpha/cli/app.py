@@ -8,8 +8,15 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import TextIO
 
+from alpha.application.elevation import (
+    enrich_all,
+    enrich_track,
+    get_tiles,
+    plan_tiles,
+)
 from alpha.application.scenarios import estimate_duration
 from alpha.application.tracks import (
+    DemProfileMissingError,
     InvalidEditError,
     TrackNotFoundError,
     Workspace,
@@ -21,6 +28,15 @@ from alpha.application.tracks import (
     show_track,
 )
 from alpha.cli import render
+from alpha.cli.config import opentopography_api_key
+from alpha.dem import (
+    DATASETS,
+    DEFAULT_DATASET,
+    DemDownloadError,
+    DemUnavailableError,
+    MetalinkError,
+    open_dem,
+)
 from alpha.domain.analysis import AnalysisParams, analyse
 from alpha.domain.scenarios import (
     DEFAULT_SPEED_MULTIPLIERS,
@@ -34,6 +50,7 @@ from alpha.gpx.reader import GpxDocument, GpxReadError, read_gpx
 from alpha.persistence import SchemaMismatchError
 from alpha.report import (
     comparison_report,
+    elevation_check_report,
     file_report,
     scenario_report,
     stored_track_ref,
@@ -46,6 +63,7 @@ EXIT_READ_ERROR = 2
 EXIT_BAD_PARAMS = 3
 EXIT_NOT_FOUND = 4
 EXIT_INVALID = 5
+EXIT_UNAVAILABLE = 6
 
 DATA_DIR_ENV = "ALPHA_DATA_DIR"
 DEFAULT_DATA_DIR = Path("data") / "local"
@@ -97,7 +115,7 @@ def _parser() -> argparse.ArgumentParser:
 
     sub = command("analyse", "analyse a GPX file without storing it", _analyse_file)
     sub.add_argument("file", type=Path)
-    _add_analysis_options(sub)
+    _add_analysis_options(sub, elevation=False)
 
     sub = command("import", "store GPX files and analyse them", _import)
     sub.add_argument("files", type=Path, nargs="+")
@@ -154,6 +172,54 @@ def _parser() -> argparse.ArgumentParser:
     )
     _add_analysis_options(sub)
 
+    sub = command(
+        "enrich",
+        "add DEM elevation (OpenTopography) and compare it with the recorded one",
+        _enrich,
+    )
+    target = sub.add_mutually_exclusive_group(required=True)
+    target.add_argument("track_id", type=int, nargs="?")
+    target.add_argument(
+        "--all",
+        action="store_true",
+        help="every track without a profile for the dataset (all with --refresh)",
+    )
+    sub.add_argument(
+        "--dataset",
+        default=DEFAULT_DATASET,
+        choices=sorted(DATASETS),
+        help="DEM dataset",
+    )
+    sub.add_argument(
+        "--refresh", action="store_true", help="sample again even if already stored"
+    )
+    sub.add_argument(
+        "--offline",
+        action="store_true",
+        help="never download; only use stored profiles and cached tiles",
+    )
+    _add_analysis_options(sub, elevation=False)
+
+    sub = command(
+        "get-tiles",
+        "download local DEM tiles listed in a metalink file (asks first)",
+        _get_tiles,
+    )
+    sub.add_argument("metalink", type=Path, help="e.g. dgm1.meta4 from the provider")
+    sub.add_argument(
+        "--dataset",
+        default="BY_DGM1",
+        choices=sorted(k for k, d in DATASETS.items() if d.download_hosts),
+        help="default %(default)s",
+    )
+    sub.add_argument(
+        "--for-tracks",
+        action="store_true",
+        help="only tiles under stored tracks (smaller; tells the server which "
+        "1 km squares your tracks cross)",
+    )
+    sub.add_argument("--yes", action="store_true", help="really download")
+
     sub = command("serve", "run the HTTP API and the local web page", _serve)
     sub.add_argument(
         "--host",
@@ -170,9 +236,18 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _add_analysis_options(sub: argparse.ArgumentParser) -> None:
+def _add_analysis_options(
+    sub: argparse.ArgumentParser, *, elevation: bool = True
+) -> None:
     sub.add_argument("--json", action="store_true", help="print a JSON report")
     defaults = AnalysisParams()
+    if elevation:
+        sub.add_argument(
+            "--elevation",
+            default=defaults.elevation,
+            help="'recorded' (default) or 'dem:<dataset>' after 'alpha enrich', "
+            "e.g. dem:COP30",
+        )
     for option, attr, unit in PARAM_OPTIONS:
         sub.add_argument(
             option,
@@ -184,7 +259,10 @@ def _add_analysis_options(sub: argparse.ArgumentParser) -> None:
 
 
 def _params(args: argparse.Namespace) -> AnalysisParams:
-    return AnalysisParams(**{attr: getattr(args, attr) for _, attr, _ in PARAM_OPTIONS})
+    values = {attr: getattr(args, attr) for _, attr, _ in PARAM_OPTIONS}
+    return AnalysisParams(
+        **values, elevation=getattr(args, "elevation", AnalysisParams().elevation)
+    )
 
 
 def _utf8_stdout() -> TextIO:
@@ -266,6 +344,9 @@ def _with_workspace(
     except InvalidEditError as exc:
         print(f"error: {exc}", file=out)
         return EXIT_INVALID
+    except DemProfileMissingError as exc:
+        print(f"error: {exc}", file=out)
+        return EXIT_UNAVAILABLE
     finally:
         ws.close()
 
@@ -315,7 +396,7 @@ def _show(args: argparse.Namespace, out: TextIO) -> int:
         if args.json:
             report = {
                 "stored": stored_track_ref(r.id, r.source_filename, r.planned_track_id),
-                **track_report(view.track, view.analysis),
+                **track_report(view.track, view.analysis, view.dem),
             }
             out.write(to_json(report))
             return EXIT_OK
@@ -324,7 +405,7 @@ def _show(args: argparse.Namespace, out: TextIO) -> int:
         if r.planned_track_id:
             print(f", follows plan #{r.planned_track_id}", end="", file=out)
         print(file=out)
-        render.analysis(view.analysis, r.read_warnings, out)
+        render.analysis(view.analysis, r.read_warnings, out, view.dem)
         return EXIT_OK
 
     return _with_workspace(args, out, action)
@@ -350,6 +431,8 @@ def _compare(args: argparse.Namespace, out: TextIO) -> int:
                             c.b.id, c.b.source_filename, c.b.planned_track_id
                         ),
                         c.result,
+                        c.dem_a,
+                        c.dem_b,
                     )
                 )
             )
@@ -442,9 +525,88 @@ def _scenarios(args: argparse.Namespace, out: TextIO) -> int:
         if args.json:
             r = view.record
             ref = stored_track_ref(r.id, r.source_filename, r.planned_track_id)
-            out.write(to_json(scenario_report(ref, view.result, view.observed)))
+            out.write(
+                to_json(scenario_report(ref, view.result, view.observed, view.dem))
+            )
             return EXIT_OK
         render.scenarios(view, out)
+        return EXIT_OK
+
+    return _with_workspace(args, out, action)
+
+
+def _enrich(args: argparse.Namespace, out: TextIO) -> int:
+    if args.all and args.json:
+        print("error: --json reports one track; use it without --all", file=out)
+        return EXIT_BAD_PARAMS
+    try:
+        params = _params(args)
+    except ValueError as exc:
+        print(f"error: {exc}", file=out)
+        return EXIT_BAD_PARAMS
+    key = None if args.offline else opentopography_api_key()
+    provider = open_dem(args.data_dir / "dem", args.dataset, key)
+
+    def action(ws: Workspace) -> int:
+        if args.all:
+            batch = enrich_all(ws, provider, refresh=args.refresh, params=params)
+            render.enrich_batch(batch, out)
+            return EXIT_UNAVAILABLE if batch.failed else EXIT_OK
+        try:
+            view = enrich_track(
+                ws, args.track_id, provider, refresh=args.refresh, params=params
+            )
+        except (DemUnavailableError, DemDownloadError) as exc:
+            print(f"error: {exc}", file=out)
+            return EXIT_UNAVAILABLE
+        if args.json:
+            r = view.record
+            ref = stored_track_ref(r.id, r.source_filename, r.planned_track_id)
+            out.write(to_json(elevation_check_report(ref, view)))
+            return EXIT_OK
+        render.elevation(view, out)
+        return EXIT_OK
+
+    return _with_workspace(args, out, action)
+
+
+def _get_tiles(args: argparse.Namespace, out: TextIO) -> int:
+    data = _read(args.metalink, out)
+    if data is None:
+        return EXIT_READ_ERROR
+
+    def action(ws: Workspace) -> int:
+        try:
+            plan = plan_tiles(
+                ws,
+                args.data_dir / "dem",
+                data,
+                args.dataset,
+                for_tracks=args.for_tracks,
+            )
+        except MetalinkError as exc:
+            print(f"error: {exc}", file=out)
+            return EXIT_INVALID
+        render.tile_plan(plan, out)
+        if plan.to_download == 0:
+            return EXIT_OK
+        if not args.yes:
+            print("Nothing downloaded yet. Repeat with --yes to download.", file=out)
+            return EXIT_OK
+
+        def progress(i: int, n: int, name: str) -> None:
+            print(f"  [{i}/{n}] {name}", file=out, flush=True)
+
+        try:
+            result = get_tiles(plan, progress=progress)
+        except (DemDownloadError, MetalinkError) as exc:
+            print(f"error: {exc}", file=out)
+            return EXIT_UNAVAILABLE
+        print(
+            f"Downloaded {len(result.downloaded)} tile(s) to {plan.directory}. "
+            f"Next: alpha enrich --all --dataset {plan.dataset.id}",
+            file=out,
+        )
         return EXIT_OK
 
     return _with_workspace(args, out, action)
@@ -459,7 +621,17 @@ def _serve(args: argparse.Namespace, out: TextIO) -> int:
             "warning: listening beyond this computer; the API has no authentication",
             file=out,
         )
-    run(args.data_dir, args.host, args.port)
+    key = opentopography_api_key()
+    print(
+        "DEM downloads: "
+        + (
+            "enabled (OpenTopography key found; only on explicit request)"
+            if key
+            else "disabled (no OPENTOPOGRAPHY_API_KEY; cached tiles only)"
+        ),
+        file=out,
+    )
+    run(args.data_dir, args.host, args.port, key)
     return EXIT_OK
 
 

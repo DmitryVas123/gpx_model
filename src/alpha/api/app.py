@@ -7,6 +7,7 @@ calculations live in the domain, all SQL in persistence. JSON is built by
 
 import json
 import logging
+import threading
 import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -21,8 +22,10 @@ from starlette.concurrency import run_in_threadpool
 
 from alpha import __version__
 from alpha.api import schemas
+from alpha.application.elevation import elevation_check, enrich_track
 from alpha.application.scenarios import estimate_duration
 from alpha.application.tracks import (
+    DemProfileMissingError,
     InvalidEditError,
     TrackNotFoundError,
     Workspace,
@@ -33,6 +36,14 @@ from alpha.application.tracks import (
     list_tracks,
     show_track,
 )
+from alpha.dem import (
+    DATASETS,
+    DEFAULT_DATASET,
+    DemDownloadError,
+    DemUnavailableError,
+    ElevationSampler,
+    open_dem,
+)
 from alpha.domain.analysis import AnalysisParams
 from alpha.domain.scenarios import (
     DEFAULT_SPEED_MULTIPLIERS,
@@ -42,6 +53,7 @@ from alpha.domain.scenarios import (
 from alpha.gpx.reader import DEFAULT_MAX_BYTES, GpxReadError, ReadErrorCode
 from alpha.report import (
     comparison_report,
+    elevation_check_report,
     list_item_report,
     record_report,
     scenario_report,
@@ -55,8 +67,19 @@ _DEFAULTS = AnalysisParams()
 
 ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
     404: {"model": schemas.ErrorResponse, "description": "TRACK_NOT_FOUND"},
-    409: {"model": schemas.ErrorResponse, "description": "INVALID_EDIT"},
+    409: {
+        "model": schemas.ErrorResponse,
+        "description": "INVALID_EDIT, or DEM_PROFILE_MISSING (run enrichment first)",
+    },
     413: {"model": schemas.ErrorResponse, "description": "FILE_TOO_LARGE"},
+    502: {
+        "model": schemas.ErrorResponse,
+        "description": "DEM_DOWNLOAD_FAILED (OpenTopography refused or unreachable)",
+    },
+    503: {
+        "model": schemas.ErrorResponse,
+        "description": "DEM_UNAVAILABLE (tiles not cached and downloads not possible)",
+    },
     422: {
         "model": schemas.ErrorResponse,
         "description": "INVALID_REQUEST, INVALID_PARAMS, SCENARIO_INPUT, or a GPX "
@@ -78,10 +101,25 @@ def _error(status: int, code: str, message: str, details: Any = None) -> JSONRes
     return JSONResponse(status_code=status, content={"error": body})
 
 
-def create_app(data_dir: Path) -> FastAPI:
+def create_app(data_dir: Path, dem_api_key: str | None = None) -> FastAPI:
+    """``dem_api_key`` enables DEM downloads (``POST /tracks/{id}/dem``). It is
+    passed in by the entry point, kept in memory, and never returned or logged."""
+
+    def dem_provider(dataset_id: str, allow_download: bool) -> ElevationSampler:
+        try:
+            return open_dem(
+                data_dir / "dem", dataset_id, dem_api_key if allow_download else None
+            )
+        except ValueError as exc:
+            raise ApiError(422, "INVALID_PARAMS", str(exc)) from exc
+
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.workspace = Workspace(data_dir)
+        app.state.dem_provider = dem_provider
+        app.state.dem_downloads_available = dem_api_key is not None
+        # One enrichment at a time: tiles are written to a shared cache.
+        app.state.dem_lock = threading.Lock()
         try:
             yield
         finally:
@@ -123,6 +161,18 @@ def _install_error_handlers(app: FastAPI) -> None:
     async def gpx_error(_: Request, exc: GpxReadError) -> JSONResponse:
         status = 413 if exc.code is ReadErrorCode.FILE_TOO_LARGE else 422
         return _error(status, str(exc.code), exc.message)
+
+    @app.exception_handler(DemProfileMissingError)
+    async def dem_missing(_: Request, exc: DemProfileMissingError) -> JSONResponse:
+        return _error(409, "DEM_PROFILE_MISSING", str(exc))
+
+    @app.exception_handler(DemUnavailableError)
+    async def dem_unavailable(_: Request, exc: DemUnavailableError) -> JSONResponse:
+        return _error(503, "DEM_UNAVAILABLE", str(exc))
+
+    @app.exception_handler(DemDownloadError)
+    async def dem_download(_: Request, exc: DemDownloadError) -> JSONResponse:
+        return _error(502, "DEM_DOWNLOAD_FAILED", str(exc))  # key already redacted
 
     @app.exception_handler(ScenarioInputError)
     async def scenario_input(_: Request, exc: ScenarioInputError) -> JSONResponse:
@@ -181,6 +231,9 @@ def _analysis_params(
     climb_min_gradient_percent: Annotated[
         float, Query()
     ] = _DEFAULTS.climb_min_gradient_percent,
+    elevation: Annotated[
+        str, Query(description="'recorded' or 'dem:<dataset>' (e.g. dem:COP30)")
+    ] = _DEFAULTS.elevation,
 ) -> AnalysisParams:
     """Analysis assumptions; defaults are documented in DATA_MODEL.md §6."""
     try:
@@ -191,6 +244,7 @@ def _analysis_params(
             moving_min_speed_m_s=moving_min_speed_m_s,
             moving_window_s=moving_window_s,
             climb_min_gradient_percent=climb_min_gradient_percent,
+            elevation=elevation,
         )
     except ValueError as exc:
         raise ApiError(422, "INVALID_PARAMS", str(exc)) from exc
@@ -247,7 +301,10 @@ def _install_routes(app: FastAPI) -> None:
 
     @app.get("/tracks", tags=["tracks"], response_model=list[schemas.TrackListItem])
     def tracks(ws: WorkspaceDep) -> list[dict[str, Any]]:
-        return [list_item_report(i.record, i.summary) for i in list_tracks(ws)]
+        return [
+            list_item_report(i.record, i.summary, i.dem_datasets)
+            for i in list_tracks(ws)
+        ]
 
     @app.get(
         "/tracks/{track_id}",
@@ -261,7 +318,7 @@ def _install_routes(app: FastAPI) -> None:
         r = view.record
         return {
             "stored": stored_track_ref(r.id, r.source_filename, r.planned_track_id),
-            **track_report(view.track, view.analysis),
+            **track_report(view.track, view.analysis, view.dem),
         }
 
     @app.patch(
@@ -317,6 +374,8 @@ def _install_routes(app: FastAPI) -> None:
             stored_track_ref(c.a.id, c.a.source_filename, c.a.planned_track_id),
             stored_track_ref(c.b.id, c.b.source_filename, c.b.planned_track_id),
             c.result,
+            c.dem_a,
+            c.dem_b,
         )
 
     @app.get(
@@ -363,4 +422,75 @@ def _install_routes(app: FastAPI) -> None:
             stored_track_ref(r.id, r.source_filename, r.planned_track_id),
             view.result,
             view.observed,
+            view.dem,
+        )
+
+    # --- DEM elevation (ADR-012) ---------------------------------------------------
+
+    @app.get("/dem/datasets", tags=["elevation"], response_model=schemas.DemDatasets)
+    def dem_datasets(request: Request) -> dict[str, Any]:
+        return {
+            "datasets": [
+                {
+                    "id": d.id,
+                    "name": d.name,
+                    "resolution_m": d.resolution_m,
+                    "surface": d.surface,
+                    "vertical_datum": d.vertical_datum,
+                    "attribution": d.attribution,
+                    "source": d.source,
+                    "obtain": d.obtain,
+                }
+                for d in DATASETS.values()
+            ],
+            "downloads_available": request.app.state.dem_downloads_available,
+        }
+
+    @app.post(
+        "/tracks/{track_id}/dem",
+        tags=["elevation"],
+        response_model=schemas.ElevationCheck,
+        responses=ERROR_RESPONSES,
+        summary="Sample DEM elevation along the track, store it, and compare",
+        description=(
+            "Uses the stored profile if there is one (unless refresh=true). "
+            "Otherwise missing tiles of a fixed 0.25 degree grid are downloaded "
+            "from OpenTopography; the track itself is never sent. offline=true "
+            "never downloads."
+        ),
+    )
+    def enrich(
+        track_id: int,
+        request: Request,
+        ws: WorkspaceDep,
+        dataset: str = DEFAULT_DATASET,
+        refresh: bool = False,
+        offline: bool = False,
+    ) -> dict[str, Any]:
+        provider = request.app.state.dem_provider(dataset, not offline)
+        with request.app.state.dem_lock:
+            view = enrich_track(ws, track_id, provider, refresh=refresh)
+        r = view.record
+        return elevation_check_report(
+            stored_track_ref(r.id, r.source_filename, r.planned_track_id), view
+        )
+
+    @app.get(
+        "/tracks/{track_id}/dem/{dataset}",
+        tags=["elevation"],
+        response_model=schemas.ElevationCheck,
+        responses=ERROR_RESPONSES,
+        summary="Compare recorded elevation with the stored DEM profile (no network)",
+    )
+    def elevation(track_id: int, dataset: str, ws: WorkspaceDep) -> dict[str, Any]:
+        if dataset not in DATASETS:
+            raise ApiError(
+                422,
+                "INVALID_PARAMS",
+                f"unknown DEM dataset {dataset!r}; known: {', '.join(DATASETS)}",
+            )
+        view = elevation_check(ws, track_id, dataset)
+        r = view.record
+        return elevation_check_report(
+            stored_track_ref(r.id, r.source_filename, r.planned_track_id), view
         )

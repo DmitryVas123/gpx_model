@@ -105,3 +105,17 @@ def test_web_frameworks_only_in_api(path: Path) -> None:
         assert module.split(".")[0] not in WEB_PACKAGES, (
             f"{path.relative_to(SRC)}: {module} may only be imported in alpha.api"
         )
+
+
+NETWORK_AND_RASTER = ("rasterio", "urllib", "http", "socket", "requests", "httpx")
+
+
+@pytest.mark.parametrize("path", _python_files(SRC), ids=lambda p: p.name)
+def test_network_and_rasters_only_in_dem_adapter(path: Path) -> None:
+    """External data access stays in one opt-in adapter (ADR-012)."""
+    if (SRC / "dem") in path.parents:
+        return
+    for module, _ in _imports(path):
+        assert module.split(".")[0] not in NETWORK_AND_RASTER, (
+            f"{path.relative_to(SRC)}: {module} may only be imported in alpha.dem"
+        )

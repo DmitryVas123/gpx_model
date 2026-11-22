@@ -33,14 +33,19 @@ local-first, and the data (personal activities) is sensitive.
     | `DELETE /tracks/{id}/source-file[?dry_run=true]` | Delete the whole source file |
     | `GET /comparisons?a=&b=` | Comparison; a GET because nothing is created (analyses are only cached) |
     | `GET /tracks/{id}/scenarios` | DIN 33466 range; repeat `speed_multiplier` for a custom range |
+    | `GET /dem/datasets` | DEM datasets and whether downloads are available (ADR-012) |
+    | `POST /tracks/{id}/dem` | Sample, store, and compare DEM elevation; downloads only missing tiles (ADR-012) |
+    | `GET /tracks/{id}/dem/{dataset}` | Elevation check from the stored profile; no network |
 
 -   **Errors** always use `{"error": {"code", "message", "details?"}}`:
 
     | Status | Codes |
     |---|---|
     | 404 | `TRACK_NOT_FOUND` |
-    | 409 | `INVALID_EDIT` |
+    | 409 | `INVALID_EDIT`, `DEM_PROFILE_MISSING` (ADR-012) |
     | 413 | `FILE_TOO_LARGE` |
+    | 502 | `DEM_DOWNLOAD_FAILED` (ADR-012) |
+    | 503 | `DEM_UNAVAILABLE`: tiles not cached and no API key (ADR-012) |
     | 422 | `INVALID_REQUEST` (schema), `INVALID_PARAMS` (domain validation), `SCENARIO_INPUT`, or the GPX read code (`INVALID_XML`, `EMPTY_FILE`, …) |
 
 -   **Logging:** one JSON line per request with operation ID (also

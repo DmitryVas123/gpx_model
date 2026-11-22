@@ -4,8 +4,10 @@ import hashlib
 from collections.abc import Sequence
 from typing import TextIO
 
+from alpha.application.elevation import ElevationView, EnrichBatch, TilePlan
 from alpha.application.scenarios import ScenarioView
 from alpha.application.tracks import TrackComparison, TrackListItem
+from alpha.dem import DATASETS
 from alpha.domain.analysis import Analysis
 from alpha.domain.climbs import ClimbSection
 from alpha.domain.comparison import MetricDelta
@@ -14,7 +16,7 @@ from alpha.domain.quality import QualityWarning, check_track
 from alpha.domain.scenarios import SCENARIO_METHODS
 from alpha.domain.track import Inference, Track
 from alpha.gpx.reader import GpxDocument, SourceTrack
-from alpha.persistence import TrackRecord
+from alpha.persistence import DemProfileRecord, TrackRecord
 
 UNKNOWN = "unknown"
 
@@ -105,12 +107,37 @@ def track_title(title: str, track: Track, out: TextIO) -> None:
     )
 
 
-def analysis(a: Analysis, read_warnings: Sequence[QualityWarning], out: TextIO) -> None:
-    print(f"  algorithm {a.algorithm_version}, params {a.params_hash[:12]}", file=out)
+def elevation_line(dem: DemProfileRecord | None) -> str:
+    if dem is None:
+        return "elevation: recorded"
+    return (
+        f"elevation: DEM {dem.dataset_name} ({dem.resolution_m:g} m {dem.surface} "
+        f"model, {dem.vertical_datum}), sampled every {dem.sample_spacing_m:g} m"
+    )
+
+
+def attribution(dems: Sequence[DemProfileRecord | None], out: TextIO) -> None:
+    """Print each DEM attribution once; required wherever DEM data is used."""
+    for text in dict.fromkeys(d.attribution for d in dems if d is not None):
+        print(f"  Attribution: {text}", file=out)
+
+
+def analysis(
+    a: Analysis,
+    read_warnings: Sequence[QualityWarning],
+    out: TextIO,
+    dem: DemProfileRecord | None = None,
+) -> None:
+    print(
+        f"  algorithm {a.algorithm_version}, params {a.params_hash[:12]}; "
+        f"{elevation_line(dem)}",
+        file=out,
+    )
     _summary(a, out)
     _distribution(a, out)
     _climbs(a, out)
     warnings(tuple(read_warnings) + a.warnings, out, indent="  ")
+    attribution([dem], out)
 
 
 def _summary(a: Analysis, out: TextIO) -> None:
@@ -225,13 +252,18 @@ def record_line(r: TrackRecord) -> str:
     )
 
 
+def _dem_label(item: TrackListItem) -> str:
+    return ",".join(item.dem_datasets) or "-"
+
+
 def track_list(items: Sequence[TrackListItem], out: TextIO) -> None:
     if not items:
         print("No tracks imported yet. Use: alpha import FILE.gpx", file=out)
         return
+    dem_w = max(len(_dem_label(i)) for i in items) + 2
     print(
         f"{'ID':>4}  {'KIND':<10}{'DATE (UTC)':<12}{'DISTANCE':>10}{'ASCENT':>9}"
-        f"{'MOVING':>9}  NAME",
+        f"{'MOVING':>9}  {'DEM':<{dem_w}}NAME",
         file=out,
     )
     guessed = False
@@ -241,9 +273,10 @@ def track_list(items: Sequence[TrackListItem], out: TextIO) -> None:
         date = r.started_at_utc.strftime("%Y-%m-%d") if r.started_at_utc else "-"
         moving = hm(s.moving_time_s) if s.moving_time_s is not None else "-"
         link = f"  (plan #{r.planned_track_id})" if r.planned_track_id else ""
+        dem = _dem_label(item)
         print(
             f"{r.id:>4}  {str(r.kind) + _guess(r.kind_inferred_by):<10}{date:<12}"
-            f"{km(s.distance_m):>10}{m(s.ascent_m):>9}{moving:>9}  "
+            f"{km(s.distance_m):>10}{m(s.ascent_m):>9}{moving:>9}  {dem:<{dem_w}}"
             f"{r.name or '(unnamed)'}{link}",
             file=out,
         )
@@ -287,6 +320,8 @@ def comparison(c: TrackComparison, out: TextIO) -> None:
     print(f"A = {record_line(c.a)}", file=out)
     print(f"B = {record_line(c.b)}", file=out)
     print(f"algorithm {r.algorithm_version}, params {r.params_hash[:12]}", file=out)
+    print(f"A {elevation_line(c.dem_a)}", file=out)
+    print(f"B {elevation_line(c.dem_b)}", file=out)
     print(file=out)
     print(f"  {'Metric':<15}{'A':>11}{'B':>11}{'B - A':>12}{'B / A':>8}", file=out)
     for d in r.metrics:
@@ -318,6 +353,7 @@ def comparison(c: TrackComparison, out: TextIO) -> None:
     print("  Notes", file=out)
     for note in r.notes:
         print(f"    - {note}", file=out)
+    attribution([c.dem_a, c.dem_b], out)
 
 
 # --- scenarios ----------------------------------------------------------------------
@@ -333,6 +369,7 @@ def scenarios(v: ScenarioView, out: TextIO) -> None:
         f"analysis {r.algorithm_version}, params {r.params_hash[:12]}",
         file=out,
     )
+    print(elevation_line(v.dem), file=out)
     print("All durations below are ESTIMATES from the stated assumptions.", file=out)
 
     source = f"{a.source}: {a.label}" if a.label else str(a.source)
@@ -387,3 +424,224 @@ def scenarios(v: ScenarioView, out: TextIO) -> None:
     print("  Notes", file=out)
     for note in r.uncertainty_notes:
         print(f"    - {note}", file=out)
+    attribution([v.dem], out)
+
+
+# --- DEM elevation ------------------------------------------------------------------
+
+
+def _diff(value: float | None) -> str:
+    return UNKNOWN if value is None else f"{value:+.1f} m"
+
+
+def elevation(v: ElevationView, out: TextIO) -> None:
+    p, c = v.profile, v.comparison
+    print(record_line(v.record), file=out)
+    print(
+        f"DEM: {p.dataset_name} ({p.resolution_m:g} m {p.surface} model, heights "
+        f"{p.vertical_datum}), sampled every {p.sample_spacing_m:g} m along the track",
+        file=out,
+    )
+    local = _is_local(p.dataset_id)
+    if v.reused:
+        source = "stored profile (nothing downloaded)"
+    elif v.downloaded_tiles:
+        source = f"downloaded tiles {', '.join(v.downloaded_tiles)}"
+    elif local:
+        source = "local tiles (nothing downloaded)"
+    else:
+        source = "cached tiles (nothing downloaded)"
+    print(
+        f"Tiles: {_tile_list(p.tiles)}; {source}; "
+        f"{'files from' if local else 'retrieved'} "
+        f"{p.retrieved_at_utc.date().isoformat()}",
+        file=out,
+    )
+    print(_privacy_note(p.dataset_id), file=out)
+
+    print(file=out)
+    print(f"  {'':<22}{'recorded':>12}{'DEM':>12}", file=out)
+    print(
+        f"  {'Ascent':<22}{m(c.ascent_recorded_m):>12}{m(c.ascent_reference_m):>12}",
+        file=out,
+    )
+    print(
+        f"  {'Descent':<22}{m(c.descent_recorded_m):>12}{m(c.descent_reference_m):>12}",
+        file=out,
+    )
+    print(file=out)
+    print("  Recorded minus DEM (calculated)", file=out)
+    rows = [
+        ("median (offset)", _diff(c.median_difference_m)),
+        ("mean", _diff(c.mean_difference_m)),
+        ("spread (std)", m(c.std_difference_m)),
+        ("95 % within", f"+/- {m(c.p95_abs_difference_m)}"),
+        (
+            "largest",
+            f"{m(c.max_abs_difference_m)} at km "
+            f"{(c.max_abs_difference_at_m or 0) / 1000:.2f}",
+        ),
+        (
+            "compared points",
+            f"{c.compared_points} ({c.reference_coverage:.0%} with DEM)",
+        ),
+    ]
+    for label, value in rows:
+        print(f"    {label:<20}{value}", file=out)
+    if c.drift is not None:
+        d = c.drift
+        print(
+            f"    {'drift (smoothed)':<20}{_diff(d.start_m)} at start, "
+            f"{_diff(d.end_m)} at end, range {m(d.range_m)} "
+            f"(min {_diff(d.min_m)} at km {d.min_at_m / 1000:.1f}, "
+            f"max {_diff(d.max_m)} at km {d.max_at_m / 1000:.1f})",
+            file=out,
+        )
+    if c.warnings:
+        warnings(c.warnings, out, "  ")
+        if p.surface == "surface":
+            print(
+                "    Against a surface model, forest can cause part of this; "
+                "a terrain model (e.g. BY_DGM1) is a better reference.",
+                file=out,
+            )
+
+    _terrain_slope(v, out)
+
+    print(file=out)
+    print("  Notes", file=out)
+    notes = [
+        "Both series are calculated or observed values with their own errors; "
+        "neither is ground truth.",
+        "Ascent uses the same hysteresis threshold for both series.",
+    ]
+    if p.surface == "surface":
+        notes.append(
+            "This DEM is a surface model: in forest or near buildings it can show "
+            "treetops or roofs rather than the ground."
+        )
+    for note in notes:
+        print(f"    - {note}", file=out)
+    print(f"  Attribution: {p.attribution}", file=out)
+
+
+def enrich_batch(b: EnrichBatch, out: TextIO) -> None:
+    profiles = [v.profile for v in b.enriched]
+    if b.enriched:
+        print(
+            f"  {'ID':>4}{'ASCENT REC.':>13}{'ASCENT DEM':>12}{'MEDIAN DIFF':>13}"
+            f"{'DRIFT':>9}  TILES",
+            file=out,
+        )
+    for v in b.enriched:
+        c = v.comparison
+        tiles = (
+            f"downloaded {', '.join(v.downloaded_tiles)}"
+            if v.downloaded_tiles
+            else "cached"
+        )
+        drift = "-" if c.drift is None else m(c.drift.range_m)
+        flag = " !" if c.warnings else ""
+        print(
+            f"  {v.record.id:>4}{m(c.ascent_recorded_m):>13}"
+            f"{m(c.ascent_reference_m):>12}{_diff(c.median_difference_m):>13}"
+            f"{drift + flag:>9}  {tiles}",
+            file=out,
+        )
+    if any(v.comparison.warnings for v in b.enriched):
+        print(
+            "  ! recorded elevation drifts against the DEM; details: "
+            "alpha enrich ID --offline",
+            file=out,
+        )
+    for f in b.failed:
+        print(f"  #{f.track_id}: error: {f.message}", file=out)
+    print(
+        f"Enriched {len(b.enriched)}, failed {len(b.failed)}, "
+        f"already stored {len(b.skipped_track_ids)} (use --refresh to sample again).",
+        file=out,
+    )
+    if b.stopped:
+        print(
+            "Stopped after a failed download; the remaining tracks were not tried.",
+            file=out,
+        )
+    if b.enriched:
+        for note in dict.fromkeys(_privacy_note(p.dataset_id) for p in profiles):
+            print(note, file=out)
+        print("Details: alpha enrich ID --offline", file=out)
+        attribution(profiles, out)
+
+
+def _is_local(dataset_id: str) -> bool:
+    dataset = DATASETS.get(dataset_id)
+    return dataset is not None and dataset.source == "local"
+
+
+def _privacy_note(dataset_id: str) -> str:
+    if _is_local(dataset_id):
+        return "Read from GeoTIFF tiles on this computer; nothing is sent anywhere."
+    return (
+        "Only fixed 0.25 degree tiles are requested from OpenTopography; the "
+        "track itself is never sent."
+    )
+
+
+def _tile_list(tiles: Sequence[str], limit: int = 6) -> str:
+    """Local 1 km tiles can be many; show a few and the count."""
+    if len(tiles) <= limit:
+        return ", ".join(tiles)
+    return f"{', '.join(tiles[:limit])}, ... ({len(tiles)} tiles)"
+
+
+def tile_plan(p: TilePlan, out: TextIO) -> None:
+    print(f"{p.dataset.name}: {p.listed} tile(s) in the metalink", file=out)
+    if p.for_tracks:
+        print(
+            f"Selected {len(p.selected)} tile(s) under your stored tracks "
+            "(incl. neighbours where a track runs along a tile edge).",
+            file=out,
+        )
+        if p.outside_metalink:
+            print(
+                f"  {p.outside_metalink} needed 1 km square(s) are not in the "
+                "metalink; those track parts will have no terrain data.",
+                file=out,
+            )
+        privacy = "The server learns which 1 km squares your tracks cross."
+    else:
+        print("Selected all tiles (use --for-tracks for fewer).", file=out)
+        privacy = "The server learns only the region you chose for the metalink."
+    print(
+        f"Already present: {p.already_present}; to download: {p.to_download} "
+        f"(sizes are not listed in the metalink) into {p.directory}",
+        file=out,
+    )
+    print(f"From: {', '.join(p.hosts)} (HTTPS). {privacy}", file=out)
+
+
+def _terrain_slope(v: ElevationView, out: TextIO) -> None:
+    print(file=out)
+    s = v.slope
+    if s is None:
+        print(f"  Terrain slope: unknown ({v.slope_note or 'not stored'})", file=out)
+        return
+    print(
+        f"  Terrain slope (calculated over +/- {s.baseline_m:g} m: steepness of "
+        "the ground around the track; not the track gradient or a hazard rating)",
+        file=out,
+    )
+    total = sum(b.distance_m for b in s.bands) + s.unknown_m
+    for b in s.bands:
+        share = b.distance_m / total if total > 0 else 0.0
+        print(
+            f"    {b.label + ' deg':<12}{km(b.distance_m):>10}{share:>6.0%}", file=out
+        )
+    if s.unknown_m > 0:
+        print(f"    {'unknown':<12}{km(s.unknown_m):>10}", file=out)
+    if s.median_deg is not None and s.max_at_m is not None:
+        print(
+            f"    median {s.median_deg:.0f} deg, 90 % below {s.p90_deg:.0f} deg, "
+            f"steepest {s.max_deg:.0f} deg at km {s.max_at_m / 1000:.2f}",
+            file=out,
+        )

@@ -87,6 +87,27 @@ class ProfileBin(Strict):
     elapsed_s: float | None
 
 
+class ElevationSeries(Strict):
+    """Which elevation the elevation-dependent values use (ADR-012)."""
+
+    source: Literal["recorded", "dem"]
+    dataset_id: str | None = None
+    dataset_name: str | None = None
+    resolution_m: float | None = None
+    surface: str | None = None
+    vertical_datum: str | None = None
+    sample_spacing_m: float | None = None
+    retrieved_at_utc: str | None = None
+    attribution: str | None = Field(
+        default=None, description="must be shown with any DEM-derived value"
+    )
+
+
+class ElevationSeriesPair(Strict):
+    a: ElevationSeries
+    b: ElevationSeries
+
+
 class StoredRef(Strict):
     id: int
     source_filename: str
@@ -118,6 +139,7 @@ class TrackRecord(Strict):
 class TrackListItem(Strict):
     record: TrackRecord
     summary: Summary
+    dem_datasets: list[str] = Field(description="datasets with a stored DEM profile")
 
 
 class TrackInfo(Strict):
@@ -141,6 +163,7 @@ class TrackAnalysis(Strict):
     """Full analysis of a stored track (``alpha show --json``)."""
 
     stored: StoredRef
+    elevation_series: ElevationSeries
     track: TrackInfo
     analysis: AnalysisInfo
     summary: Summary
@@ -222,6 +245,7 @@ class Comparison(Strict):
     biggest_climb: ClimbPair
     steepest_climb: ClimbPair
     notes: list[str]
+    elevation_series: ElevationSeriesPair
 
 
 # --- scenarios ---------------------------------------------------------------------
@@ -288,3 +312,93 @@ class Scenarios(Strict):
     scenarios: list[DurationScenario]
     observed: list[Observed]
     uncertainty_notes: list[str]
+    elevation_series: ElevationSeries
+
+
+# --- DEM elevation (ADR-012) ------------------------------------------------------
+
+
+class DemDataset(Strict):
+    id: str
+    name: str
+    resolution_m: float
+    surface: str
+    vertical_datum: str
+    attribution: str
+    source: Literal["opentopography", "local"] = Field(
+        description="local: read from GeoTIFF tiles in the data directory, "
+        "never downloaded"
+    )
+    obtain: str | None = Field(description="where to get tiles for a local dataset")
+
+
+class DemDatasets(Strict):
+    datasets: list[DemDataset]
+    downloads_available: bool = Field(
+        description="OpenTopography datasets: false when the server has no API "
+        "key; then only cached tiles can be used"
+    )
+
+
+class ElevationDrift(Strict):
+    """Smoothed recorded-minus-DEM difference (median per 100 m, rolling
+    median over window_m)."""
+
+    range_m: float
+    start_m: float
+    end_m: float
+    min_m: float
+    min_at_m: float
+    max_m: float
+    max_at_m: float
+    window_m: float
+
+
+class ElevationDifference(Strict):
+    provenance: Literal["calculated"]
+    difference: Literal["recorded minus DEM"]
+    compared_points: int
+    reference_coverage: float | None
+    median_difference_m: float | None
+    mean_difference_m: float | None
+    std_difference_m: float | None
+    p95_abs_difference_m: float | None
+    max_abs_difference_m: float | None
+    max_abs_difference_at_m: float | None
+    ascent_recorded_m: float | None
+    descent_recorded_m: float | None
+    ascent_dem_m: float | None
+    descent_dem_m: float | None
+    drift: ElevationDrift | None
+
+
+class SlopeBand(Strict):
+    band_deg: str
+    distance_m: float | None
+
+
+class TerrainSlope(Strict):
+    """Steepness of the ground around the track from the DEM (ADR-015)."""
+
+    provenance: Literal["calculated"]
+    meaning: str
+    baseline_m: float
+    bands_m: list[SlopeBand]
+    unknown_m: float | None
+    median_deg: float | None
+    p90_deg: float | None
+    max_deg: float | None
+    max_at_m: float | None
+
+
+class ElevationCheck(Strict):
+    format_version: str
+    track: StoredRef
+    elevation_series: ElevationSeries
+    tiles: list[str]
+    downloaded_tiles: list[str]
+    reused_stored_profile: bool
+    comparison: ElevationDifference
+    warnings: list[Warning] = Field(description="e.g. ELEVATION_DRIFT")
+    terrain_slope: TerrainSlope | None
+    terrain_slope_note: str | None

@@ -8,15 +8,22 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Integer,
+    LargeBinary,
     String,
     Text,
     UniqueConstraint,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-# Bump when tables change. There are no migrations yet: a mismatching database
-# is rejected with an explanation (ADR-002).
-SCHEMA_VERSION = 1
+# Bump when tables change. Purely additive changes (new tables only) are
+# migrated automatically; anything else is rejected with an explanation
+# (ADR-002). 2: dem_profiles (ADR-012).
+SCHEMA_VERSION = 3
+# Upgrades that only add tables: version -> tables new in version + 1.
+ADDITIVE_UPGRADES: dict[int, tuple[str, ...]] = {
+    1: ("dem_profiles",),
+    2: ("terrain_slopes",),
+}
 
 
 class Base(DeclarativeBase):
@@ -150,3 +157,48 @@ class ClimbSectionRow(Base):
     max_bin_gradient_percent: Mapped[float] = mapped_column(Float)
     start_bin: Mapped[int] = mapped_column(Integer)
     end_bin: Mapped[int] = mapped_column(Integer)
+
+
+class DemProfileRow(Base):
+    """A reference elevation series sampled from a DEM, one value per point
+    (float64 little-endian; NaN = no data), with its provenance."""
+
+    __tablename__ = "dem_profiles"
+    __table_args__ = (UniqueConstraint("track_id", "dataset_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    track_id: Mapped[int] = mapped_column(
+        ForeignKey("tracks.id", ondelete="CASCADE"), index=True
+    )
+    dataset_id: Mapped[str] = mapped_column(String)
+    dataset_name: Mapped[str] = mapped_column(String)
+    resolution_m: Mapped[float] = mapped_column(Float)
+    surface: Mapped[str] = mapped_column(String)
+    vertical_datum: Mapped[str] = mapped_column(String)
+    attribution: Mapped[str] = mapped_column(Text)
+    sample_spacing_m: Mapped[float] = mapped_column(Float)
+    tiles_json: Mapped[str] = mapped_column(Text)
+    retrieved_at_utc: Mapped[datetime] = mapped_column(DateTime)
+    created_at_utc: Mapped[datetime] = mapped_column(DateTime)
+    point_count: Mapped[int] = mapped_column(Integer)
+    elevation_blob: Mapped[bytes] = mapped_column(LargeBinary)
+
+
+class TerrainSlopeRow(Base):
+    """Terrain slope in degrees, one value per point (float64 little-endian;
+    NaN = unknown), derived from the DEM profile of the same dataset
+    (ADR-015)."""
+
+    __tablename__ = "terrain_slopes"
+    __table_args__ = (UniqueConstraint("track_id", "dataset_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    track_id: Mapped[int] = mapped_column(
+        ForeignKey("tracks.id", ondelete="CASCADE"), index=True
+    )
+    dataset_id: Mapped[str] = mapped_column(String)
+    baseline_m: Mapped[float] = mapped_column(Float)
+    sample_spacing_m: Mapped[float] = mapped_column(Float)
+    created_at_utc: Mapped[datetime] = mapped_column(DateTime)
+    point_count: Mapped[int] = mapped_column(Integer)
+    slope_blob: Mapped[bytes] = mapped_column(LargeBinary)

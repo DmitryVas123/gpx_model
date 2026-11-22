@@ -216,3 +216,33 @@ def test_distance_filter_can_be_switched_off() -> None:
     track = hill_track()
     s = analyse(track, AnalysisParams(distance_min_step_m=0.0)).summary
     assert s.distance_m == pytest.approx(s.distance_raw_m)
+
+
+# --- elevation series (ADR-012) ------------------------------------------------------
+
+
+@pytest.mark.parametrize("value", ["bogus", "dem:", "DEM:COP30", ""])
+def test_invalid_elevation_setting(value: str) -> None:
+    with pytest.raises(ValueError, match="elevation must be"):
+        AnalysisParams(elevation=value)
+
+
+def test_elevation_setting_enters_the_hash() -> None:
+    assert params_hash(AnalysisParams(elevation="dem:COP30")) != params_hash(
+        AnalysisParams()
+    )
+
+
+def test_analysis_refuses_mismatched_elevation_source() -> None:
+    from alpha.domain.reference_elevation import with_elevation
+
+    track = hill_track()
+    dem_track = with_elevation(track, track.ele_raw_m + 1.0)
+    with pytest.raises(ValueError, match="elevation source"):
+        analyse(track, AnalysisParams(elevation="dem:COP30"))
+    with pytest.raises(ValueError, match="elevation source"):
+        analyse(dem_track, AnalysisParams())
+    dem_analysis = analyse(dem_track, AnalysisParams(elevation="dem:COP30"))
+    assert dem_analysis.summary.max_elevation_m == pytest.approx(
+        analyse(track).summary.max_elevation_m + 1.0  # type: ignore[operator]
+    )

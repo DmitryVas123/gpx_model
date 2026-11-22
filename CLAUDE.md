@@ -65,6 +65,16 @@ in MVP_ROADMAP.md.
     `alpha.report`; API schemas mirror it with `extra="forbid"`.
 -   The web page (`api/static/index.html`) inserts server data with
     `textContent` only and loads no external resources.
+-   Network access and rasterio only in `alpha.dem`, and only on explicit
+    user request (`alpha enrich`, `alpha get-tiles --yes`, or
+    `POST /tracks/{id}/dem` after a confirmation on the page). Metalinks
+    and other downloaded lists are untrusted: plain file names only, known
+    HTTPS hosts only, verify what arrives. Tests never use the network. `alpha.api`
+    receives the API key from `alpha serve`; it never reads it itself.
+-   Secrets (e.g. `OPENTOPOGRAPHY_API_KEY`) come from the environment or
+    `.env`; never print, log, store, or put them in error messages or
+    URLs that are logged. `.env` is git-ignored; `.env.example` has no
+    values.
 -   Prefer plain functions and dataclasses. Use Strategy (a function
     registry) for scenario methods. No abstract base classes with a
     single implementation.
@@ -95,6 +105,9 @@ in MVP_ROADMAP.md.
     change.
 -   Label values as observed, calculated, estimated, or unknown.
 -   Scenario outputs always carry method, assumptions, and breakdown.
+-   The elevation series is a parameter (`AnalysisParams.elevation`,
+    `recorded` or `dem:<dataset>`), never a silent fallback. Every output
+    derived from a DEM carries `elevation_series` with the attribution.
 
 ## 6. Testing
 

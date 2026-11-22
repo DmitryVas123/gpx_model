@@ -110,3 +110,59 @@ def line_track(
     ele = ele_of_distance(distance) if ele_of_distance else None
     time = np.arange(n) * seconds_per_point if seconds_per_point else None
     return make_track(lat, ele=ele, time=time)
+
+
+# --- synthetic DEM tiles (no network) ---
+
+
+def plane_elevation(
+    lat: npt.NDArray[np.float64], lon: npt.NDArray[np.float64]
+) -> npt.NDArray[np.float64]:
+    """A tilted plane: bilinear interpolation reproduces it exactly."""
+    return 1000.0 + 20_000.0 * (lat - LAT0) + 5_000.0 * (lon - LON0)
+
+
+def geotiff_for_bounds(
+    bounds: tuple[float, float, float, float],
+    elevation: Callable[
+        [npt.NDArray[np.float64], npt.NDArray[np.float64]], npt.NDArray[np.float64]
+    ] = plane_elevation,
+    resolution_deg: float = 0.001,
+) -> bytes:
+    """A north-up float32 GeoTIFF covering ``(south, north, west, east)``."""
+    from rasterio.io import MemoryFile
+    from rasterio.transform import from_origin
+
+    south, north, west, east = bounds
+    cols = round((east - west) / resolution_deg)
+    rows = round((north - south) / resolution_deg)
+    lon = west + (np.arange(cols) + 0.5) * resolution_deg
+    lat = north - (np.arange(rows) + 0.5) * resolution_deg
+    grid_lon, grid_lat = np.meshgrid(lon, lat)
+    data = elevation(grid_lat, grid_lon).astype(np.float32)
+    with MemoryFile() as memory:
+        with memory.open(
+            driver="GTiff",
+            height=rows,
+            width=cols,
+            count=1,
+            dtype="float32",
+            crs="EPSG:4326",
+            transform=from_origin(west, north, resolution_deg, resolution_deg),
+        ) as dataset:
+            dataset.write(data, 1)
+        return bytes(memory.read())
+
+
+class FakeFetch:
+    """Stands in for the OpenTopography download and counts calls."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, tuple[float, float, float, float]]] = []
+
+    def __call__(
+        self, dataset_id: str, bounds: tuple[float, float, float, float], api_key: str
+    ) -> bytes:
+        assert api_key, "the provider must pass the key"
+        self.calls.append((dataset_id, bounds))
+        return geotiff_for_bounds(bounds)

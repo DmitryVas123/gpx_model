@@ -239,13 +239,74 @@ band plus `unknown`, so tracks are comparable:
 
 `< -25 | -25..-15 | -15..-5 | -5..5 | 5..15 | 15..25 | 25..40 | >= 40 | unknown` (%)
 
+### 5.7 Reference elevation from a DEM (ADR-012, ADR-013)
+
+-   Datasets: `COP30` (Copernicus GLO-30, 30 m surface model, downloaded
+    via OpenTopography) and `BY_DGM1` (Bavaria, 1 m terrain model, read
+    from GeoTIFF tiles the user puts in `<data dir>/dem/BY_DGM1/`; never
+    downloaded). Local tiles are read in their own CRS; points outside
+    every tile are `NaN`.
+
+-   A DEM is sampled at **knots** about `20 m` apart along the track
+    (per source segment: first point, displacement-filter points at
+    20 m, last point), bilinearly between pixel centres. Values between
+    knots are interpolated linearly along the path, giving one value per
+    point (`NaN` where the DEM has no data).
+-   Sampling at every 1 Hz point is wrong: lateral GPS jitter on a slope
+    becomes vertical noise (Nebelhorn_push DEM gain 1862 m at 1 Hz vs
+    1441 m at 20 m).
+-   Stored per track and dataset with provenance: dataset, resolution,
+    surface/terrain model, vertical datum, attribution, spacing, tiles,
+    retrieval time. `ele_raw_m` is never changed.
+-   Comparison (`compare_elevation`), recorded minus reference:
+    -   `median_difference_m` (offset), `mean_difference_m`,
+        `std_difference_m` (shape disagreement);
+    -   `p95_abs_difference_m`, `max_abs_difference_m` and its distance;
+    -   ascent/descent of both series with the same hysteresis threshold;
+    -   **drift** (ADR-014): the difference, median per `bin_m` [100 m],
+        then a rolling median over `window_m` [500 m]. Reported as start,
+        end, min, and max with positions, and as the range. A range of at
+        least `warn_range_m` [20 m] raises `ELEVATION_DRIFT`. These
+        `DriftParams` do not affect analyses, so they are not part of
+        `AnalysisParams` or the params hash.
+-   **Using it in the analysis:** `AnalysisParams.elevation` is
+    `"recorded"` (default) or `"dem:<dataset>"`, e.g. `"dem:COP30"`. It
+    enters the params hash.
+    -   With a DEM, every elevation-dependent value uses that series:
+        ascent/descent, min/max, 3D distance, profile, gradient, climbs,
+        and the 3D speed behind moving time. The moving-time change is
+        < 0.5 min on the reference activities.
+    -   The application builds the analysed track with `with_elevation`
+        (elevation source `dem_enriched`). `analyse()` refuses a mismatch
+        between the setting and the track's elevation source.
+    -   A missing profile is an error (`DemProfileMissingError`, API 409
+        `DEM_PROFILE_MISSING`), never a silent fallback.
+    -   `dem_enriched` cannot be set with `edit`; it is reserved for
+        sampled series.
+
+### 5.8 Terrain slope (ADR-015)
+
+-   `terrain_slope_deg` = `atan(|∇z|)` from the DEM at four probes
+    `baseline_m` [15 m] north, south, east, and west of each knot (20 m
+    spacing, as in §5.7). Values between knots are interpolated along the
+    track; NaN where any probe lacks data.
+-   It measures the steepness of the **ground around** the track,
+    independent of the direction of travel. It is **not** the track
+    gradient (§5.4) and not a hazard rating.
+-   Summary (`TerrainSlopeSummary`), distance-weighted on the filtered
+    distance (each step counts with the slope at its end):
+    -   distance per band `<10`, `10-20`, `20-30`, `30-40`, `40-50`,
+        `>=50` degrees;
+    -   `unknown_m`;
+    -   `median_deg`, `p90_deg`, `max_deg`, `max_at_m`.
+
 ## 6. Analysis contract
 
 Implemented in `alpha.domain.analysis`; `analyse(track, params) ->
 Analysis` is a pure function.
 
 ``` python
-ALGORITHM_VERSION = "0.2.0"
+ALGORITHM_VERSION = "0.3.0"   # 0.3.0 added `elevation`
 
 @dataclass(frozen=True)
 class AnalysisParams:                 # validated in __post_init__
@@ -260,6 +321,7 @@ class AnalysisParams:                 # validated in __post_init__
     climb_min_gradient_percent: float = 8.0
     climb_max_interruption_m: float = 150.0
     climb_min_elevation_change_m: float = 50.0
+    elevation: str = "recorded"       # or "dem:<dataset>" (§5.7)
 
 def params_hash(params) -> str:       # SHA-256 of canonical JSON (sorted keys)
 
@@ -319,8 +381,33 @@ not.
 
 ### 6.1 Report format (`alpha.report`, `alpha analyse --json`)
 
-JSON with `format_version: "2"` (2 added `distance_raw_m` and renamed
-`distance_in_stops_m` to `distance_while_stopped_m`):
+JSON with `format_version: "6"`:
+
+-   2 added `distance_raw_m` and renamed `distance_in_stops_m` to
+    `distance_while_stopped_m`.
+-   3 added `elevation_series` to track, comparison (`a`/`b`), and
+    scenario reports.
+    -   `source` is `recorded` or `dem`. For a DEM it also carries dataset,
+        resolution, surface/terrain, vertical datum, sample spacing,
+        retrieval time, and **attribution**; for recorded elevation those
+        keys are null.
+    -   The attribution must be shown wherever DEM-derived values are
+        shown.
+-   4 added the **elevation check report** (`alpha enrich ID --json`,
+    `GET /tracks/{id}/dem/{dataset}`, `POST /tracks/{id}/dem`): track
+    reference, `elevation_series`, `tiles`, `downloaded_tiles`,
+    `reused_stored_profile`, and `comparison` (calculated, recorded minus
+    DEM: median, mean, std, p95/max absolute difference and its position,
+    ascent/descent of both series as `*_recorded_m` / `*_dem_m`). Track
+    list items gained `dem_datasets` (datasets with a stored profile).
+-   5 added `comparison.drift` (range, start, end, min/max and their
+    positions, window) and `warnings` (`ELEVATION_DRIFT`) to the
+    elevation check report (ADR-014).
+-   6 added `terrain_slope` (calculated; bands, unknown, median, p90, max
+    and its position, baseline) and `terrain_slope_note` (why it is
+    missing) to the elevation check report (ADR-015).
+
+The report itself contains:
 
 -   `file`: name, SHA-256, size, creator, GPX version, waypoint count.
 -   `warnings`: file-level warnings.
@@ -543,6 +630,7 @@ class QualityParams:
 | `SOURCE_SEGMENT_GAP` | Boundary between source segments spans > `source_segment_gap_m` [100 m] | `check_track` |
 | `KIND_INFERRED` / `ELEVATION_SOURCE_INFERRED` | Value guessed by heuristic, not stated by the user | `check_track` |
 | `GRADIENT_OUTLIER` | Profile-bin gradient steeper than ±`gradient_outlier_percent` [100 %]; uses `bin_indices` | `analyse` |
+| `ELEVATION_DRIFT` | Smoothed recorded-minus-reference difference (median per 100 m, rolling median over 500 m) spans ≥ `warn_range_m` [20 m] (ADR-014) | `compare_elevation` (elevation check only) |
 
 Conventions:
 
@@ -571,7 +659,8 @@ Used consistently in code, API, and UI (matching PROJECT_VISION.md):
 
 ## 10. Persistence (SQLite, MVP; ADR-002)
 
-Implemented in `alpha.persistence.schema` (schema version 1). The data
+Implemented in `alpha.persistence.schema` (schema version 3; additive
+upgrades from older versions run automatically). The data
 directory (default `data/local/`, git-ignored) holds `alpha.db` and
 `files/<sha256>.gpx`, an unmodified copy of every imported file. IDs are
 integers. Times are stored as naive UTC.
@@ -633,6 +722,25 @@ user edits the track's kind or elevation source.
 -   `direction`, `start_distance_m`, `end_distance_m`,
     `elevation_change_m`, `mean_gradient_percent`,
     `max_bin_gradient_percent`, `start_bin`, `end_bin`
+
+### `dem_profiles` (schema 2, unique `track_id, dataset_id`; ADR-012)
+
+-   `track_id` (cascade), `dataset_id`, `dataset_name`, `resolution_m`,
+    `surface`, `vertical_datum`, `attribution`, `sample_spacing_m`,
+    `tiles_json`, `retrieved_at_utc`, `created_at_utc`, `point_count`
+-   `elevation_blob`: one float64 (little-endian) per track point; NaN =
+    no data
+
+### `terrain_slopes` (schema 3, unique `track_id, dataset_id`; ADR-015)
+
+-   `track_id` (cascade), `dataset_id`, `baseline_m`, `sample_spacing_m`,
+    `created_at_utc`, `point_count`
+-   `slope_blob`: one float64 (little-endian) per track point, degrees;
+    NaN = unknown
+
+DEM tiles themselves are cached as files in `<data dir>/dem/<dataset>/`
+with a JSON sidecar (bounds, retrieval time). Local tiles (`BY_DGM1`) are
+indexed in `_index.json` (ADR-013).
 
 ### `scenarios` (deferred; not created, ADR-005)
 

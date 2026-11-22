@@ -86,7 +86,7 @@ def test_analyse_json() -> None:
     assert code == EXIT_OK
     data = json.loads(text)
     (track,) = data["tracks"]
-    assert data["format_version"] == "2"
+    assert data["format_version"] == "6"
     assert track["source"] == {"element": "trk", "index": 0}
     assert track["summary"]["distance_m"]["unit"] == "m"
     assert track["analysis"]["params"]["profile_bin_m"] == 50.0

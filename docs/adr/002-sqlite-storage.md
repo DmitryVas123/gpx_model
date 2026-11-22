@@ -46,9 +46,11 @@ of tracks of up to ~25k points each.
 -   **Deleting** works per source file: all its tracks, points, analyses,
     and the stored copy. Links from activities to deleted plans are set to
     NULL. The CLI requires `--yes`.
--   **No migrations yet.** `meta.schema_version` is checked on open. A
-    mismatch is refused with instructions to move the database aside and
-    re-import (the originals are kept).
+-   **No general migrations.** `meta.schema_version` is checked on open.
+    Purely additive versions (new tables only, listed in
+    `ADDITIVE_UPGRADES`) are applied in place; anything else is refused
+    with instructions to move the database aside and re-import (the
+    originals are kept). Schema 2 (`dem_profiles`, ADR-012) is additive.
 -   No bounding-box columns or spatial index until a feature needs them.
 
 ## Consequences

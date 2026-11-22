@@ -11,18 +11,58 @@ from dataclasses import fields
 from datetime import UTC, datetime
 from typing import Any
 
+from alpha.application.elevation import ElevationView
 from alpha.application.scenarios import ObservedTime
 from alpha.domain.analysis import Analysis, TrackSummary
 from alpha.domain.climbs import ClimbSection
 from alpha.domain.comparison import ComparisonResult
 from alpha.domain.quality import QualityWarning
+from alpha.domain.reference_elevation import ElevationDrift
 from alpha.domain.scenarios import ScenarioResult
+from alpha.domain.terrain import TerrainSlopeSummary
 from alpha.domain.track import Track
 from alpha.gpx.reader import GpxDocument, SourceTrack
-from alpha.persistence import TrackRecord
+from alpha.persistence import DemProfileRecord, TrackRecord
 
 # 2: summary gained distance_raw_m; distance_in_stops_m -> distance_while_stopped_m
-REPORT_FORMAT_VERSION = "2"
+# 3: "elevation_series" (recorded or DEM, with provenance and attribution)
+# 4: elevation check report; list items gained "dem_datasets"
+# 5: elevation check gained "comparison.drift" and "warnings" (ELEVATION_DRIFT)
+# 6: elevation check gained "terrain_slope" and "terrain_slope_note"
+REPORT_FORMAT_VERSION = "6"
+
+
+def elevation_series_report(dem: DemProfileRecord | None) -> dict[str, Any]:
+    """Which elevation the elevation-dependent values use. DEM provenance and
+    the dataset's attribution travel with every result derived from it."""
+    if dem is None:  # same keys either way, so CLI and API JSON are identical
+        return {
+            "source": "recorded",
+            **dict.fromkeys(
+                (
+                    "dataset_id",
+                    "dataset_name",
+                    "resolution_m",
+                    "surface",
+                    "vertical_datum",
+                    "sample_spacing_m",
+                    "retrieved_at_utc",
+                    "attribution",
+                )
+            ),
+        }
+    return {
+        "source": "dem",
+        "dataset_id": dem.dataset_id,
+        "dataset_name": dem.dataset_name,
+        "resolution_m": dem.resolution_m,
+        "surface": dem.surface,
+        "vertical_datum": dem.vertical_datum,
+        "sample_spacing_m": dem.sample_spacing_m,
+        "retrieved_at_utc": dem.retrieved_at_utc.isoformat(),
+        "attribution": dem.attribution,
+    }
+
 
 # Summary field -> (unit, decimals). Every summary value is calculated from the
 # GPX; a missing value is reported as "unknown", never as zero.
@@ -76,8 +116,11 @@ def warning_report(w: QualityWarning) -> dict[str, Any]:
     return report
 
 
-def track_report(track: Track, analysis: Analysis) -> dict[str, Any]:
+def track_report(
+    track: Track, analysis: Analysis, dem: DemProfileRecord | None = None
+) -> dict[str, Any]:
     return {
+        "elevation_series": elevation_series_report(dem),
         "track": {
             "name": track.name,
             "activity_type": track.activity_type,
@@ -193,7 +236,11 @@ def stored_track_ref(
 
 
 def comparison_report(
-    ref_a: dict[str, Any], ref_b: dict[str, Any], result: ComparisonResult
+    ref_a: dict[str, Any],
+    ref_b: dict[str, Any],
+    result: ComparisonResult,
+    dem_a: DemProfileRecord | None = None,
+    dem_b: DemProfileRecord | None = None,
 ) -> dict[str, Any]:
     """B compared against A. Unknown values are null, never zero."""
 
@@ -239,6 +286,10 @@ def comparison_report(
             "b": _climb_report(result.steepest_climb_b),
         },
         "notes": list(result.notes),
+        "elevation_series": {
+            "a": elevation_series_report(dem_a),
+            "b": elevation_series_report(dem_b),
+        },
     }
 
 
@@ -246,6 +297,7 @@ def scenario_report(
     ref: dict[str, Any],
     result: ScenarioResult,
     observed: Sequence[ObservedTime],
+    dem: DemProfileRecord | None = None,
 ) -> dict[str, Any]:
     """Scenario estimates with their assumptions, plus observed times."""
     a = result.assumptions
@@ -301,6 +353,7 @@ def scenario_report(
             for o in observed
         ],
         "uncertainty_notes": list(result.uncertainty_notes),
+        "elevation_series": elevation_series_report(dem),
     }
 
 
@@ -333,5 +386,79 @@ def record_report(r: TrackRecord) -> dict[str, Any]:
     }
 
 
-def list_item_report(record: TrackRecord, summary: TrackSummary) -> dict[str, Any]:
-    return {"record": record_report(record), "summary": summary_report(summary)}
+def list_item_report(
+    record: TrackRecord, summary: TrackSummary, dem_datasets: Sequence[str] = ()
+) -> dict[str, Any]:
+    return {
+        "record": record_report(record),
+        "summary": summary_report(summary),
+        "dem_datasets": list(dem_datasets),
+    }
+
+
+def elevation_check_report(ref: dict[str, Any], view: ElevationView) -> dict[str, Any]:
+    """Recorded elevation compared with a stored DEM profile (ADR-012)."""
+    p, c = view.profile, view.comparison
+    return {
+        "format_version": REPORT_FORMAT_VERSION,
+        "track": ref,
+        "elevation_series": elevation_series_report(p),
+        "tiles": list(p.tiles),
+        "downloaded_tiles": list(view.downloaded_tiles),
+        "reused_stored_profile": view.reused,
+        "comparison": {
+            "provenance": "calculated",
+            "difference": "recorded minus DEM",
+            "compared_points": c.compared_points,
+            "reference_coverage": _round(c.reference_coverage, 4),
+            "median_difference_m": _round(c.median_difference_m, 1),
+            "mean_difference_m": _round(c.mean_difference_m, 1),
+            "std_difference_m": _round(c.std_difference_m, 1),
+            "p95_abs_difference_m": _round(c.p95_abs_difference_m, 1),
+            "max_abs_difference_m": _round(c.max_abs_difference_m, 1),
+            "max_abs_difference_at_m": _round(c.max_abs_difference_at_m, 0),
+            "ascent_recorded_m": _round(c.ascent_recorded_m, 1),
+            "descent_recorded_m": _round(c.descent_recorded_m, 1),
+            "ascent_dem_m": _round(c.ascent_reference_m, 1),
+            "descent_dem_m": _round(c.descent_reference_m, 1),
+            "drift": _drift_report(c.drift),
+        },
+        "warnings": [warning_report(w) for w in c.warnings],
+        "terrain_slope": _slope_report(view.slope),
+        "terrain_slope_note": view.slope_note,
+    }
+
+
+def _slope_report(s: TerrainSlopeSummary | None) -> dict[str, Any] | None:
+    if s is None:
+        return None
+    return {
+        "provenance": "calculated",
+        "meaning": "steepness of the ground around the track, not the track "
+        "gradient and not a hazard rating",
+        "baseline_m": s.baseline_m,
+        "bands_m": [
+            {"band_deg": b.label, "distance_m": _round(b.distance_m, 0)}
+            for b in s.bands
+        ],
+        "unknown_m": _round(s.unknown_m, 0),
+        "median_deg": _round(s.median_deg, 1),
+        "p90_deg": _round(s.p90_deg, 1),
+        "max_deg": _round(s.max_deg, 1),
+        "max_at_m": _round(s.max_at_m, 0),
+    }
+
+
+def _drift_report(d: ElevationDrift | None) -> dict[str, Any] | None:
+    if d is None:
+        return None
+    return {
+        "range_m": _round(d.range_m, 1),
+        "start_m": _round(d.start_m, 1),
+        "end_m": _round(d.end_m, 1),
+        "min_m": _round(d.min_m, 1),
+        "min_at_m": _round(d.min_at_m, 0),
+        "max_m": _round(d.max_m, 1),
+        "max_at_m": _round(d.max_at_m, 0),
+        "window_m": d.window_m,
+    }

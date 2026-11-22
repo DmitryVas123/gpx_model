@@ -6,6 +6,7 @@ from alpha.cli.app import (
     EXIT_NOT_FOUND,
     EXIT_OK,
     EXIT_READ_ERROR,
+    EXIT_UNAVAILABLE,
     main,
 )
 
@@ -15,5 +16,6 @@ __all__ = [
     "EXIT_NOT_FOUND",
     "EXIT_OK",
     "EXIT_READ_ERROR",
+    "EXIT_UNAVAILABLE",
     "main",
 ]

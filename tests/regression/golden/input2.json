@@ -1,5 +1,5 @@
 {
-  "format_version": "2",
+  "format_version": "6",
   "file": {
     "name": "input2.gpx",
     "sha256": "123b0c8708cab1d15474b204eb1660b4a864988cba65fe36ef6f4f6bb75f60bb",
@@ -16,6 +16,17 @@
         "index": 0
       },
       "read_warnings": [],
+      "elevation_series": {
+        "source": "recorded",
+        "dataset_id": null,
+        "dataset_name": null,
+        "resolution_m": null,
+        "surface": null,
+        "vertical_datum": null,
+        "sample_spacing_m": null,
+        "retrieved_at_utc": null,
+        "attribution": null
+      },
       "track": {
         "name": "Route from  to",
         "activity_type": null,
@@ -33,8 +44,8 @@
         "time_coverage": 0.0
       },
       "analysis": {
-        "algorithm_version": "0.2.0",
-        "params_hash": "351e89dc66ffc3ef206f8de281ac31671e84459861ed0db9234509d9d11b233b",
+        "algorithm_version": "0.3.0",
+        "params_hash": "8b3cfef4365f02bf2c7b4478f5a3553e7ef55a40736ec9d400985a00648ac613",
         "params": {
           "profile_bin_m": 50.0,
           "ascent_threshold_m": 3.0,
@@ -46,6 +57,7 @@
           "climb_min_gradient_percent": 8.0,
           "climb_max_interruption_m": 150.0,
           "climb_min_elevation_change_m": 50.0,
+          "elevation": "recorded",
           "quality": {
             "gap_threshold_s": 60.0,
             "jump_speed_m_s": 5.0,

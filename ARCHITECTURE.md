@@ -55,7 +55,7 @@ through `application`.
 
 ## 3. Source tree by phase
 
-### Current (MVP, Phases 1--5)
+### Current (MVP, Phases 1--5, Phase 6 in progress)
 
 ``` text
 gpx_model/
@@ -72,7 +72,10 @@ gpx_model/
 │   │   ├── quality.py        # warning detection
 │   │   ├── analysis.py       # AnalysisParams, analyse(track, params)
 │   │   ├── comparison.py     # compare(a, b) -> ComparisonResult
-│   │   └── scenarios.py      # method registry, din33466, assumptions
+│   │   ├── scenarios.py      # method registry, din33466, assumptions
+│   │   ├── reference_elevation.py # DEM knots, interpolation, comparison,
+│   │   │                     # drift (ADR-014)
+│   │   └── terrain.py        # terrain slope from DEM probes (ADR-015)
 │   ├── gpx/
 │   │   └── reader.py         # bytes -> tracks + warnings
 │   ├── persistence/
@@ -81,11 +84,17 @@ gpx_model/
 │   │   └── files.py          # FileStore: files/<sha256>.gpx
 │   ├── application/
 │   │   ├── tracks.py         # Workspace; import/list/show/compare/edit/delete
-│   │   └── scenarios.py      # estimate_duration + observed times
+│   │   ├── scenarios.py      # estimate_duration + observed times
+│   │   └── elevation.py      # enrich_track, elevation_check (DEM)
+│   ├── dem/                  # DEM adapter: datasets, 0.25° tiles, cache,
+│   │                         # OpenTopography client, local GeoTIFF tiles
+│   │                         # (local.py), metalink downloads (metalink.py),
+│   │                         # bilinear sampling, open_dem()
 │   ├── report.py             # JSON reports (shared by CLI and API)
 │   ├── cli/
 │   │   ├── app.py            # argument parsing, commands, exit codes
-│   │   └── render.py         # plain-text output
+│   │   ├── render.py         # plain-text output
+│   │   └── config.py         # .env / environment (API key; never printed)
 │   └── api/
 │       ├── app.py            # FastAPI routes, error handlers, request log
 │       ├── schemas.py        # Pydantic response/request models
@@ -227,13 +236,14 @@ Implemented in `alpha.application.tracks` (ADR-002).
 -   Python 3.12+, `pyproject.toml`, virtual environment
 -   gpxpy, NumPy, pyproj
 -   SQLAlchemy 2.x + SQLite (ADR-002)
+-   rasterio (GDAL) for reading DEM tiles, only in `alpha.dem` (ADR-012)
 -   FastAPI + Pydantic v2 (Phase 5)
 -   pytest, Ruff, mypy or pyright
 -   pandas, plotly: exploration scripts only
 
 ### Later
 
--   Rasterio/GDAL for DEM sampling; PostGIS if spatial queries appear
+-   PostGIS if spatial queries appear
 -   scikit-learn for personal performance baselines, only inside
     `alpha.modelling` (ADR-005)
 -   React + MapLibre UI
@@ -254,6 +264,9 @@ Implemented in `alpha.application.tracks` (ADR-002).
 | `DELETE /tracks/{id}/source-file[?dry_run=true]` | Delete the source file and its tracks |
 | `GET /comparisons?a=&b=` | Compare b against a |
 | `GET /tracks/{id}/scenarios` | DIN 33466 range + observed times |
+| `GET /dem/datasets` | DEM datasets, `downloads_available` |
+| `POST /tracks/{id}/dem` | Enrich with DEM elevation (downloads missing tiles only) |
+| `GET /tracks/{id}/dem/{dataset}` | Elevation check from the stored profile (no network) |
 
 Scenario query parameters:
 
@@ -262,8 +275,16 @@ Scenario query parameters:
 -   `break_min`, `delay_min`;
 -   `speed_multiplier` (repeatable).
 
+Analysis query parameters include `elevation=recorded|dem:<dataset>`
+(ADR-012). The page has a matching selector.
+
 Errors are always `{"error": {"code", "message", "details?"}}` with
-404 / 409 / 413 / 422 (ADR-011).
+404 / 409 / 413 / 422 (ADR-011); 409 includes `DEM_PROFILE_MISSING`;
+DEM downloads add 502 `DEM_DOWNLOAD_FAILED` and 503 `DEM_UNAVAILABLE`.
+
+The OpenTopography key is read by the CLI (`alpha serve`) and passed to
+`create_app(data_dir, dem_api_key)`; `alpha.api` never reads the
+environment for it.
 
 ## 9. Reliability and observability
 
@@ -291,6 +312,14 @@ Errors are always `{"error": {"code", "message", "details?"}}` with
 -   Deleting a source file removes all derived rows and the stored copy.
 -   The API binds to localhost by default and has no authentication; the
     web page loads nothing from the internet and inserts data as text only.
+-   The only outbound network access is DEM download in `alpha.dem`,
+    always opt-in:
+    -   `alpha enrich` (COP30): fixed 0.25° tiles, never the track itself;
+    -   `alpha get-tiles --yes` (DGM1 from a metalink): the region the user
+        chose, or with `--for-tracks` the 1 km squares the tracks cross
+        (ADR-013).
+    The API key comes from the environment or `.env` and is never printed
+    or logged (ADR-012).
 -   Document licences and attribution for map and elevation data.
 
 ## 11. Architecture decision records
@@ -308,6 +337,7 @@ Written (accepted):
 -   ADR-005: scenario methods vs assumption sources; ML outside domain.
 -   ADR-010: jitter-filtered distance (3 m minimum displacement).
 -   ADR-011: HTTP API, error format, logging, local page; no workers.
+-   ADR-012: DEM enrichment (COP30 via OpenTopography, tiles, 20 m knots).
 
 Planned:
 

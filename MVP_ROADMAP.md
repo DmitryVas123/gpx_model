@@ -59,12 +59,35 @@ Phase exit criteria matter more than dates.
     end-to-end API flow and checks that the page never uses `innerHTML`
     and loads nothing from the internet. The page itself was checked for
     JavaScript syntax but not yet rendered in a browser by the assistant.
+-   **Phase 6 done (terrain enrichment, ADR-012 to ADR-015).**
+    -   COP30 surface model via OpenTopography: opt-in, fixed 0.25° tiles,
+        local cache, tile margins reused at edges.
+    -   Bavaria DGM1 terrain model from local GeoTIFF tiles. Downloaded
+        from the portal's metalink with `alpha get-tiles` (all tiles, or
+        `--for-tracks`), each tile verified.
+    -   Profiles sampled every 20 m with provenance and attribution
+        (schema 3, additive upgrades).
+    -   Analyses can run on any stored series (`--elevation dem:<id>`,
+        algorithm 0.3.0).
+    -   The elevation check covers offset, spread, drift
+        (`ELEVATION_DRIFT`), and terrain slope by 10° band. It is
+        available in the CLI (also `--all`), the API, and the page, with
+        downloads only after explicit confirmation. Report format 6.
+    -   Findings on four activities:
+        -   Strava's gain equals COP30 sampled every 20 m.
+        -   COP30 overstates gain in forest by 0–28 % against the terrain
+            model (+235 m on Wanderung am Abend).
+        -   The Nebelhorn barometer drifted by −40 m.
+        -   The drift threshold of 20 m separates cleanly against the
+            terrain model, but not against COP30 in forest.
+    -   604 tests.
 -   `scripts/explore.py` (former `main.py`): plotting sandbox only. Every
     known issue in its calculations is solved in the package (segment
     boundaries, spacing-independent windows, no clipping, timestamps,
     `<rte>`, encodings). Its numbers are not authoritative.
 -   Reference data: two planned routes (mapy.com) in `data/samples/`
-    and two recorded activities (Strava) in `data/local/`; see
+    and four recorded activities (Strava) in `data/local/`, with DGM1
+    tiles for them; see
     DATA_MODEL.md §3.
 -   Open questions (owner's input needed):
     -   confirm that mapy.com exports may be shared publicly; otherwise
@@ -209,11 +232,25 @@ Phase exit criteria matter more than dates.
 
 ### Phase 6 --- Terrain enrichment
 
--   DEM provider adapter; sample elevation along tracks
+-   ✅ DEM provider adapter; sample elevation along tracks
     (`ElevationSource.DEM_ENRICHED`).
--   Record DEM source, resolution, and vertical datum.
--   Compare recorded/planner elevation with DEM; surface discrepancies.
--   Terrain slope from raster, clearly separated from track gradient.
+-   ✅ Record DEM source, resolution, and vertical datum.
+-   ✅ Compare recorded/planner elevation with DEM; surface discrepancies.
+-   ✅ Analyse with the DEM series as an explicit, hashed parameter choice.
+-   ✅ Enrichment and elevation check from the API and page; batch
+    enrichment (`alpha enrich --all`).
+-   ✅ National terrain model from local tiles (Bavaria DGM1); forest
+    effect measured (ADR-013).
+-   ✅ Drift of recorded elevation against the model (ADR-014).
+-   ✅ Terrain slope from raster, clearly separated from track gradient
+    (ADR-015).
+
+**Phase 6 exit:** every DEM-derived value carries its dataset, surface
+or terrain type, and attribution. Downloads happen only on explicit
+request and never send the track (COP30), or send only what the user
+chose (DGM1 metalink). Recorded elevation is never modified. The findings
+are reproducible from regression tests that skip when personal data is
+absent.
 
 ### Phase 7 --- Personal performance baseline
 

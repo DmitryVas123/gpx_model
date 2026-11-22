@@ -76,5 +76,15 @@ rather than the exported values. The comparison therefore cannot
 calibrate the threshold. It shows only that the 3 m threshold removes
 about 0.5 % relative to the exported data.
 
-Revisit when an independent reference exists for the same elevation
-series, or when DEM enrichment (Phase 6) provides a second source.
+**Resolved by ADR-012 (Phase 6):** Copernicus GLO-30 DEM elevation,
+sampled every 20 m along the track with the same 3 m threshold, gives
+1441 m (Nebelhorn_push) and 1311 m (Gleitweg), within 2 m of Strava's
+1443 m and 1309 m. Strava's gain is therefore DEM-based; the recorded
+barometric series legitimately gives less. ALPHA reports both, labelled
+by source, and keeps 3 m as the threshold for both.
+
+**Refined by ADR-013:** the Bavarian 1 m terrain model (no trees) gives
+1239 m on Gleitweg (Strava and COP30: about 1310 m, so canopy accounts
+for about 70 m) and 1436 m on Nebelhorn_push (mostly above the treeline;
+same as COP30). On Nebelhorn_push the recorded series falls about 40 m
+short at the summit because of barometer drift.

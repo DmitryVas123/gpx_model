@@ -58,8 +58,47 @@ alpha edit 3 --planned-track 1             # link an activity to the plan it fol
 alpha edit 1 --kind planned --elevation-source planner_dem   # confirm or correct guesses
 alpha scenarios 1 --break-min 30          # DIN 33466 estimate range + observed times
 alpha scenarios 1 --horizontal-speed-km-h 5 --ascent-rate-m-h 500   # your own assumptions
+alpha enrich 3                # DEM elevation (opt-in download) vs recorded elevation
+alpha enrich --all            # every track that has no DEM elevation yet
+alpha show 3 --elevation dem:COP30         # any analysis on the DEM series instead
+alpha compare 1 3 --elevation dem:COP30    # (both tracks need `alpha enrich` first)
 alpha delete 2                # shows what would be deleted; add --yes to delete
 ```
+
+### DEM enrichment (optional)
+
+The elevation check compares your recorded elevation with a terrain
+model: offset, spread, **drift** (warning `ELEVATION_DRIFT`), ascent from
+both, and **terrain slope** (steepness of the ground around the track in
+10° bands; not the track gradient and not a hazard rating).
+
+`alpha enrich ID` needs an OpenTopography API key: copy `.env.example` to
+`.env` and fill in `OPENTOPOGRAPHY_API_KEY`. Only fixed 0.25° tiles are
+requested (never your track); they are cached in `data/local/dem/`, and
+`--offline` never downloads. Copernicus DEM attribution is printed with
+every result (ADR-012). `alpha list` shows which tracks have DEM
+elevation. With the key in `.env`, `alpha serve` also lets the page add
+DEM elevation (after a confirmation); without it, the page uses only
+what is already stored.
+
+**Bavaria DGM1 (1 m terrain model, no trees):** on
+geodaten.bayern.de/opengeodata select a region for DGM1 and save the
+metalink (`.meta4`) in `data/local/`, then:
+
+``` bash
+alpha get-tiles data/local/dgm1.meta4 --for-tracks   # plan only: what, how many, privacy
+alpha get-tiles data/local/dgm1.meta4 --for-tracks --yes
+alpha enrich --all --dataset BY_DGM1      # reads local tiles; nothing is sent
+alpha show 3 --elevation dem:BY_DGM1
+```
+
+Without `--for-tracks` all tiles of the region are downloaded (can be
+several GB). With it, only tiles under your stored tracks, but the server
+then learns which 1 km squares they cross. Tiles you place in
+`data/local/dem/BY_DGM1/` by hand work too.
+
+Data: Bayerische Vermessungsverwaltung – www.geodaten.bayern.de,
+CC BY 4.0 (ADR-013).
 
 ### Local web page and API
 

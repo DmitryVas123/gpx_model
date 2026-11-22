@@ -7,7 +7,12 @@ given the analysis, the method, and the assumptions (ADR-005).
 from dataclasses import dataclass
 from enum import StrEnum
 
-from alpha.application.tracks import Workspace, analysis_for, require_track
+from alpha.application.tracks import (
+    Workspace,
+    analysis_for,
+    dem_profile_for,
+    require_track,
+)
 from alpha.domain.analysis import AnalysisParams
 from alpha.domain.scenarios import (
     DEFAULT_SPEED_MULTIPLIERS,
@@ -18,7 +23,7 @@ from alpha.domain.scenarios import (
     scenario_inputs,
 )
 from alpha.domain.track import TrackKind
-from alpha.persistence import TrackRecord
+from alpha.persistence import DemProfileRecord, TrackRecord
 
 
 class ObservedRelation(StrEnum):
@@ -46,6 +51,7 @@ class ScenarioView:
     record: TrackRecord
     result: ScenarioResult
     observed: tuple[ObservedTime, ...]
+    dem: DemProfileRecord | None  # provenance when DEM elevation was used
 
 
 def estimate_duration(
@@ -60,6 +66,7 @@ def estimate_duration(
     with ws.db.transaction() as repo:
         record = require_track(repo, track_id)
         _, analysis = analysis_for(repo, track_id, p)
+        dem = dem_profile_for(repo, track_id, p)
         result = run_scenarios(analysis, assumptions, speed_multipliers)
 
         sources: list[tuple[TrackRecord, ObservedRelation]] = []
@@ -90,4 +97,4 @@ def estimate_duration(
                     implied_speed_multiplier=implied,
                 )
             )
-    return ScenarioView(record, result, tuple(observed))
+    return ScenarioView(record, result, tuple(observed), dem)

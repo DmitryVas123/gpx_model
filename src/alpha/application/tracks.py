@@ -14,13 +14,16 @@ from alpha.domain.analysis import (
     AnalysisParams,
     TrackSummary,
     analyse,
+    dem_dataset_of,
     params_hash,
 )
 from alpha.domain.comparison import ComparisonResult, compare
+from alpha.domain.reference_elevation import with_elevation
 from alpha.domain.track import ElevationSource, Track, TrackKind
 from alpha.gpx.reader import PARSER_NAME, PARSER_VERSION, read_gpx
 from alpha.persistence import (
     Database,
+    DemProfileRecord,
     FileStore,
     NewSourceFile,
     NewTrack,
@@ -40,6 +43,18 @@ class TrackNotFoundError(Exception):
 
 class InvalidEditError(Exception):
     pass
+
+
+class DemProfileMissingError(Exception):
+    """An analysis asked for DEM elevation the track does not have yet."""
+
+    def __init__(self, track_id: int, dataset_id: str) -> None:
+        super().__init__(
+            f"track {track_id} has no {dataset_id} elevation yet; run "
+            f"'alpha enrich {track_id} --dataset {dataset_id}' first"
+        )
+        self.track_id = track_id
+        self.dataset_id = dataset_id
 
 
 class Workspace:
@@ -129,10 +144,34 @@ def require_track(repo: Repository, track_id: int) -> TrackRecord:
 # --- reading ----------------------------------------------------------------------
 
 
+def dem_profile_for(
+    repo: Repository, track_id: int, params: AnalysisParams
+) -> DemProfileRecord | None:
+    """The stored DEM profile ``params.elevation`` asks for, or ``None`` for
+    recorded elevation. Raises ``DemProfileMissingError`` if it is not stored."""
+    dataset_id = dem_dataset_of(params.elevation)
+    if dataset_id is None:
+        return None
+    profile = repo.get_dem_profile(track_id, dataset_id)
+    if profile is None:
+        raise DemProfileMissingError(track_id, dataset_id)
+    return profile
+
+
+def track_for_analysis(
+    repo: Repository, track_id: int, params: AnalysisParams
+) -> Track:
+    """The stored track with the elevation series ``params.elevation`` selects.
+    The stored recorded elevation itself is never modified."""
+    track = repo.load_track(track_id)
+    profile = dem_profile_for(repo, track_id, params)
+    return track if profile is None else with_elevation(track, profile.elevation_m)
+
+
 def analysis_for(
     repo: Repository, track_id: int, params: AnalysisParams
 ) -> tuple[Track, Analysis]:
-    track = repo.load_track(track_id)
+    track = track_for_analysis(repo, track_id, params)
     cached = repo.get_analysis(track_id, ALGORITHM_VERSION, params_hash(params))
     if cached is not None:
         return track, cached
@@ -145,6 +184,7 @@ def analysis_for(
 class TrackListItem:
     record: TrackRecord
     summary: TrackSummary
+    dem_datasets: tuple[str, ...] = ()  # stored DEM profiles (ADR-012)
 
 
 def list_tracks(
@@ -154,12 +194,13 @@ def list_tracks(
     p = params or AnalysisParams()
     with ws.db.transaction() as repo:
         summaries = repo.summaries(ALGORITHM_VERSION, params_hash(p))
+        dems = repo.dem_datasets_by_track()
         items = []
         for record in repo.list_tracks():
             summary = summaries.get(record.id)
             if summary is None:
                 summary = analysis_for(repo, record.id, p)[1].summary
-            items.append(TrackListItem(record, summary))
+            items.append(TrackListItem(record, summary, dems.get(record.id, ())))
     return items
 
 
@@ -168,6 +209,7 @@ class TrackView:
     record: TrackRecord
     track: Track
     analysis: Analysis
+    dem: DemProfileRecord | None  # provenance when DEM elevation was used
 
 
 def show_track(
@@ -175,8 +217,10 @@ def show_track(
 ) -> TrackView:
     with ws.db.transaction() as repo:
         record = require_track(repo, track_id)
-        track, analysis = analysis_for(repo, track_id, params or AnalysisParams())
-    return TrackView(record, track, analysis)
+        p = params or AnalysisParams()
+        track, analysis = analysis_for(repo, track_id, p)
+        dem = dem_profile_for(repo, track_id, p)
+    return TrackView(record, track, analysis, dem)
 
 
 @dataclass(frozen=True)
@@ -184,6 +228,8 @@ class TrackComparison:
     a: TrackRecord
     b: TrackRecord
     result: ComparisonResult
+    dem_a: DemProfileRecord | None
+    dem_b: DemProfileRecord | None
 
 
 def compare_tracks(
@@ -195,7 +241,13 @@ def compare_tracks(
         record_a, record_b = require_track(repo, track_a), require_track(repo, track_b)
         t_a, a_a = analysis_for(repo, track_a, p)
         t_b, a_b = analysis_for(repo, track_b, p)
-    return TrackComparison(record_a, record_b, compare(t_a, a_a, t_b, a_b))
+        dem_a, dem_b = (
+            dem_profile_for(repo, track_a, p),
+            dem_profile_for(repo, track_b, p),
+        )
+    return TrackComparison(
+        record_a, record_b, compare(t_a, a_a, t_b, a_b), dem_a, dem_b
+    )
 
 
 # --- editing ------------------------------------------------------------------------
@@ -218,6 +270,11 @@ def edit_track(
     """
     if planned_track_id is not None and clear_planned_track:
         raise InvalidEditError("cannot set and clear the planned track at once")
+    if elevation_source is ElevationSource.DEM_ENRICHED:
+        raise InvalidEditError(
+            "'dem_enriched' is set by ALPHA for sampled DEM series; use "
+            "'alpha enrich' and --elevation dem:<dataset> instead"
+        )
     with ws.db.transaction() as repo:
         record = require_track(repo, track_id)
         new_kind = kind or record.kind

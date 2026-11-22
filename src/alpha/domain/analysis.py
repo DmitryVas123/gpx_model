@@ -22,13 +22,30 @@ from alpha.domain.quality import (
     check_track,
 )
 from alpha.domain.timing import time_metrics
-from alpha.domain.track import Track
+from alpha.domain.track import ElevationSource, Track
 
 # Bump when any calculation changes its output for the same input and params.
 # Regression tests on the reference files make such changes visible.
 # 0.2.0: jitter-filtered distance (ADR-010) and windowed-speed moving time
 #        (ADR-007 rev. 2), both calibrated against Strava on two activities.
-ALGORITHM_VERSION = "0.2.0"
+# 0.3.0: elevation series is an explicit parameter (ADR-012); results with
+#        recorded elevation are numerically unchanged.
+ALGORITHM_VERSION = "0.3.0"
+
+ELEVATION_RECORDED = "recorded"
+DEM_PREFIX = "dem:"
+
+
+def dem_dataset_of(elevation: str) -> str | None:
+    """Dataset id for ``"dem:<id>"``; ``None`` for recorded elevation."""
+    if elevation == ELEVATION_RECORDED:
+        return None
+    if elevation.startswith(DEM_PREFIX) and len(elevation) > len(DEM_PREFIX):
+        return elevation[len(DEM_PREFIX) :]
+    raise ValueError(
+        f"elevation must be '{ELEVATION_RECORDED}' or '{DEM_PREFIX}<dataset>', "
+        f"not {elevation!r}"
+    )
 
 
 @dataclass(frozen=True)
@@ -46,6 +63,9 @@ class AnalysisParams:
     climb_min_gradient_percent: float = 8.0
     climb_max_interruption_m: float = 150.0
     climb_min_elevation_change_m: float = 50.0
+    # Which elevation series every elevation-dependent metric uses: the
+    # recorded one, or a stored DEM profile such as "dem:COP30" (ADR-012).
+    elevation: str = ELEVATION_RECORDED
 
     def __post_init__(self) -> None:
         positive = (
@@ -68,6 +88,7 @@ class AnalysisParams:
         for name in non_negative:
             if getattr(self, name) < 0:
                 raise ValueError(f"{name} must be >= 0")
+        dem_dataset_of(self.elevation)  # validates the format
 
 
 def params_hash(params: AnalysisParams) -> str:
@@ -108,7 +129,17 @@ class Analysis:
 
 
 def analyse(track: Track, params: AnalysisParams | None = None) -> Analysis:
+    """Analyse ``track`` as given. With ``params.elevation = "dem:<id>"`` the
+    caller must pass the track with that DEM series as its elevation (see
+    ``reference_elevation.with_elevation``); a mismatch is refused so a result
+    can never be labelled with the wrong elevation source."""
     p = params or AnalysisParams()
+    uses_dem = dem_dataset_of(p.elevation) is not None
+    if uses_dem != (track.elevation_source is ElevationSource.DEM_ENRICHED):
+        raise ValueError(
+            f"params.elevation is {p.elevation!r} but the track's elevation source "
+            f"is {track.elevation_source!r}"
+        )
 
     raw_distance = float(step_distances_m(track)[within_segment(track)].sum())
     increments = filtered_step_distances_m(track, p.distance_min_step_m)

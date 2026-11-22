@@ -24,13 +24,16 @@ from alpha.domain.profile import ProfileBin
 from alpha.domain.quality import QualityParams, QualityWarning, WarningCode
 from alpha.domain.track import ElevationSource, Inference, Track, TrackKind
 from alpha.persistence.schema import (
+    ADDITIVE_UPGRADES,
     SCHEMA_VERSION,
     AnalysisRow,
     Base,
     ClimbSectionRow,
+    DemProfileRow,
     MetaRow,
     ProfileBinRow,
     SourceFileRow,
+    TerrainSlopeRow,
     TrackPointRow,
     TrackRow,
 )
@@ -98,6 +101,36 @@ class TrackRecord:
     read_warnings: tuple[QualityWarning, ...]
 
 
+@dataclass(frozen=True)
+class DemProfileRecord:
+    """Stored reference elevation from a DEM, with provenance (ADR-012)."""
+
+    track_id: int
+    dataset_id: str
+    dataset_name: str
+    resolution_m: float
+    surface: str
+    vertical_datum: str
+    attribution: str
+    sample_spacing_m: float
+    tiles: tuple[str, ...]
+    retrieved_at_utc: datetime
+    created_at_utc: datetime
+    elevation_m: np.ndarray[tuple[int], np.dtype[np.float64]]
+
+
+@dataclass(frozen=True)
+class TerrainSlopeRecord:
+    """Stored terrain slope per point, from one DEM dataset (ADR-015)."""
+
+    track_id: int
+    dataset_id: str
+    baseline_m: float  # central differences over +/- baseline_m
+    sample_spacing_m: float
+    created_at_utc: datetime
+    slope_deg: np.ndarray[tuple[int], np.dtype[np.float64]]
+
+
 def _enable_foreign_keys(dbapi_connection: Any, _record: Any) -> None:
     cursor = dbapi_connection.cursor()
     cursor.execute("PRAGMA foreign_keys=ON")
@@ -117,6 +150,9 @@ class Database:
             with Session(self.engine) as session:
                 row = session.get(MetaRow, "schema_version")
                 found = row.value if row else None
+            if found is not None and found.isdigit() and int(found) < SCHEMA_VERSION:
+                self._upgrade(int(found))
+                return
             if found != str(SCHEMA_VERSION):
                 raise SchemaMismatchError(
                     f"{self.path} has schema version {found}; this ALPHA needs "
@@ -127,6 +163,26 @@ class Database:
         Base.metadata.create_all(self.engine)
         with Session(self.engine) as session, session.begin():
             session.add(MetaRow(key="schema_version", value=str(SCHEMA_VERSION)))
+
+    def _upgrade(self, found: int) -> None:
+        """Apply additive upgrades (new tables only) from ``found`` onwards."""
+        for version in range(found, SCHEMA_VERSION):
+            if version not in ADDITIVE_UPGRADES:
+                raise SchemaMismatchError(
+                    f"{self.path} has schema version {found}; no automatic upgrade "
+                    f"to {SCHEMA_VERSION}. Move the database aside and re-import."
+                )
+        tables = [
+            Base.metadata.tables[name]
+            for version in range(found, SCHEMA_VERSION)
+            for name in ADDITIVE_UPGRADES[version]
+        ]
+        Base.metadata.create_all(self.engine, tables=tables)
+        with Session(self.engine) as session, session.begin():
+            row = session.get(MetaRow, "schema_version")
+            if row is None:
+                raise SchemaMismatchError(f"{self.path} has no schema version")
+            row.value = str(SCHEMA_VERSION)
 
     @contextmanager
     def transaction(self) -> Iterator["Repository"]:
@@ -440,6 +496,124 @@ class Repository:
     def delete_analyses(self, track_id: int) -> None:
         self.session.execute(
             delete(AnalysisRow).where(AnalysisRow.track_id == track_id)
+        )
+
+    # --- DEM profiles ---------------------------------------------------------------
+
+    def get_dem_profile(
+        self, track_id: int, dataset_id: str
+    ) -> DemProfileRecord | None:
+        row = self.session.scalars(
+            select(DemProfileRow).where(
+                DemProfileRow.track_id == track_id,
+                DemProfileRow.dataset_id == dataset_id,
+            )
+        ).one_or_none()
+        if row is None:
+            return None
+        values = np.frombuffer(row.elevation_blob, dtype="<f8").astype(np.float64)
+        return DemProfileRecord(
+            track_id=row.track_id,
+            dataset_id=row.dataset_id,
+            dataset_name=row.dataset_name,
+            resolution_m=row.resolution_m,
+            surface=row.surface,
+            vertical_datum=row.vertical_datum,
+            attribution=row.attribution,
+            sample_spacing_m=row.sample_spacing_m,
+            tiles=tuple(json.loads(row.tiles_json)),
+            retrieved_at_utc=row.retrieved_at_utc.replace(tzinfo=UTC),
+            created_at_utc=row.created_at_utc.replace(tzinfo=UTC),
+            elevation_m=values,
+        )
+
+    def dem_datasets_by_track(self) -> dict[int, tuple[str, ...]]:
+        """Dataset IDs with a stored profile, per track (no elevation blobs)."""
+        rows = self.session.execute(
+            select(DemProfileRow.track_id, DemProfileRow.dataset_id).order_by(
+                DemProfileRow.track_id, DemProfileRow.dataset_id
+            )
+        ).all()
+        result: dict[int, tuple[str, ...]] = {}
+        for track_id, dataset_id in rows:
+            result[track_id] = (*result.get(track_id, ()), dataset_id)
+        return result
+
+    def get_terrain_slope(
+        self, track_id: int, dataset_id: str
+    ) -> TerrainSlopeRecord | None:
+        row = self.session.scalars(
+            select(TerrainSlopeRow).where(
+                TerrainSlopeRow.track_id == track_id,
+                TerrainSlopeRow.dataset_id == dataset_id,
+            )
+        ).one_or_none()
+        if row is None:
+            return None
+        return TerrainSlopeRecord(
+            track_id=row.track_id,
+            dataset_id=row.dataset_id,
+            baseline_m=row.baseline_m,
+            sample_spacing_m=row.sample_spacing_m,
+            created_at_utc=row.created_at_utc.replace(tzinfo=UTC),
+            slope_deg=np.frombuffer(row.slope_blob, dtype="<f8").astype(np.float64),
+        )
+
+    def save_terrain_slope(self, slope: TerrainSlopeRecord) -> None:
+        """Insert or replace the slope for (track, dataset)."""
+        self.delete_terrain_slope(slope.track_id, slope.dataset_id)
+        values = np.asarray(slope.slope_deg, dtype="<f8")
+        self.session.add(
+            TerrainSlopeRow(
+                track_id=slope.track_id,
+                dataset_id=slope.dataset_id,
+                baseline_m=slope.baseline_m,
+                sample_spacing_m=slope.sample_spacing_m,
+                created_at_utc=slope.created_at_utc.astimezone(UTC).replace(
+                    tzinfo=None
+                ),
+                point_count=len(values),
+                slope_blob=values.tobytes(),
+            )
+        )
+
+    def delete_terrain_slope(self, track_id: int, dataset_id: str) -> None:
+        self.session.execute(
+            delete(TerrainSlopeRow).where(
+                TerrainSlopeRow.track_id == track_id,
+                TerrainSlopeRow.dataset_id == dataset_id,
+            )
+        )
+
+    def save_dem_profile(self, profile: DemProfileRecord) -> None:
+        """Insert or replace the profile for (track, dataset)."""
+        self.session.execute(
+            delete(DemProfileRow).where(
+                DemProfileRow.track_id == profile.track_id,
+                DemProfileRow.dataset_id == profile.dataset_id,
+            )
+        )
+        values = np.asarray(profile.elevation_m, dtype="<f8")
+        self.session.add(
+            DemProfileRow(
+                track_id=profile.track_id,
+                dataset_id=profile.dataset_id,
+                dataset_name=profile.dataset_name,
+                resolution_m=profile.resolution_m,
+                surface=profile.surface,
+                vertical_datum=profile.vertical_datum,
+                attribution=profile.attribution,
+                sample_spacing_m=profile.sample_spacing_m,
+                tiles_json=json.dumps(list(profile.tiles)),
+                retrieved_at_utc=profile.retrieved_at_utc.astimezone(UTC).replace(
+                    tzinfo=None
+                ),
+                created_at_utc=profile.created_at_utc.astimezone(UTC).replace(
+                    tzinfo=None
+                ),
+                point_count=len(values),
+                elevation_blob=values.tobytes(),
+            )
         )
 
     # --- row -> record conversion -------------------------------------------------
