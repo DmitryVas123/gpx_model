@@ -99,6 +99,12 @@ in MVP_ROADMAP.md.
 -   Regression tests: golden outputs for the reference files. Personal
     files in `data/local/` are optional; skip those tests when the file
     is absent.
+-   Golden files: `tests/regression/golden/` (committed, samples) and
+    `data/local/golden/` (git-ignored, personal). When an output change
+    is intended, bump `ALGORITHM_VERSION`, run
+    `python -m pytest tests/regression --update-golden`, and report the
+    diff of the golden files. Never update goldens to silence an
+    unexplained difference.
 -   Parser and database tests are separate from domain tests. Do not
     mock the calculation under test.
 

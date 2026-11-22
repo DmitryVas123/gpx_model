@@ -20,28 +20,36 @@ Phase exit criteria matter more than dates.
     (`domain/quality.py`), GPX reader for `<trk>` and `<rte>` with
     encoding detection (`gpx/reader.py`), and `alpha inspect FILE`.
     93 tests; all four reference files meet the exit criteria.
--   `scripts/explore.py` (former `main.py`): exploration sandbox. Parses
-    `<trk>` points with gpxpy into pandas, computes haversine distance,
-    5-point rolling-mean elevation, step gradient clipped to ±45 %, a
-    summary dict, and a plotly profile.
+-   **Phase 2 done.** Hysteresis ascent/descent (`domain/elevation.py`,
+    ADR-004), profile bins, gradient, and gradient distribution
+    (`domain/profile.py`, ADR-009), elapsed/moving/stopped/gap time
+    (`domain/timing.py`, ADR-007), climb sections (`domain/climbs.py`),
+    `analyse()` with `ALGORITHM_VERSION` and `params_hash`
+    (`domain/analysis.py`), the JSON report (`report.py`), and
+    `alpha analyse FILE [--json] [--profile-bin-m ...]`.
+-   **Calibration (algorithm 0.2.0).** Strava's values for both
+    activities exposed a +14–20 % distance bias from 1 Hz GPS jitter and
+    a +8–21 % moving-time bias. A 3 m minimum-displacement distance
+    filter (ADR-010) and a 3D windowed-speed moving rule (ADR-007 rev. 2)
+    now match Strava within 0.3 % (distance) and 1 % (moving time).
+    Strava's elevation gain cannot be reproduced from exported data
+    (ADR-004). 265 tests, including invariants and golden outputs.
+-   `scripts/explore.py` (former `main.py`): plotting sandbox only. Every
+    known issue in its calculations is solved in the package (segment
+    boundaries, spacing-independent windows, no clipping, timestamps,
+    `<rte>`, encodings). Its numbers are not authoritative.
 -   Reference data: two planned routes (mapy.com) in `data/samples/`
     and two recorded activities (Strava) in `data/local/`; see
     DATA_MODEL.md §3.
--   Open Phase 0 follow-ups (owner's decision):
+-   Open questions (owner's input needed):
     -   confirm that mapy.com exports may be shared publicly; otherwise
-        move them to `data/local/`;
+        move them to `data/local/` (their golden files move with them);
     -   `.idea/` is ignored now but still tracked from earlier commits
-        (`git rm -r --cached .idea` untracks it).
--   Known issues in the exploration code, to fix while moving it into
-    the package:
-    -   distance summed across track/segment boundaries;
-    -   smoothing window counted in points, not metres;
-    -   gradient clipped silently (hides both artifacts and real steep
-        sections);
-    -   timestamps dropped, so activity time cannot be analysed;
-    -   code runs at import time, so it cannot be tested.
-    (Reading `<rte>`, encodings, and timestamps is solved in
-    `alpha.gpx.reader`.)
+        (`git rm -r --cached .idea` untracks it);
+    -   more calibration data: the distance and moving-time rules fit two
+        activities from one device. Strava values for a few more
+        (different terrain, ideally another device) would show whether
+        they generalise.
 
 ------------------------------------------------------------------------
 

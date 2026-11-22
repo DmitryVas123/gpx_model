@@ -28,6 +28,7 @@ class WarningCode(StrEnum):
     SOURCE_SEGMENT_GAP = "SOURCE_SEGMENT_GAP"
     KIND_INFERRED = "KIND_INFERRED"
     ELEVATION_SOURCE_INFERRED = "ELEVATION_SOURCE_INFERRED"
+    GRADIENT_OUTLIER = "GRADIENT_OUTLIER"
 
 
 @dataclass(frozen=True)
@@ -36,6 +37,7 @@ class QualityWarning:
     message: str
     point_indices: tuple[int, ...] = ()
     count: int | None = None
+    bin_indices: tuple[int, ...] = ()  # profile bins (analysis warnings only)
 
 
 @dataclass(frozen=True)

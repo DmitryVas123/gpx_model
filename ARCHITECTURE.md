@@ -248,12 +248,18 @@ Example scenario request:
 
 `docs/adr/NNN-title.md`, one page each:
 
+Written (accepted):
+
 -   ADR-001: modular monolith; layers introduced per phase.
--   ADR-002: SQLite first; PostGIS only for spatial queries.
--   ADR-003: GPX (`trk` and `rte`) as the only input format for MVP.
--   ADR-004: elevation policy: hysteresis threshold, per-source defaults.
--   ADR-005: scenario method `din33466` and its units.
--   ADR-006: when to introduce background workers.
--   ADR-007: moving-time and stop definition; stationary GPS jitter.
+-   ADR-004: ascent/descent by hysteresis, 3 m for all sources.
+-   ADR-007: moving time by 3D windowed speed (rev. 2, Strava-calibrated).
 -   ADR-008: column-oriented `Track` with NumPy; pandas outside domain.
--   ADR-009: profile bin length and gradient outlier policy.
+-   ADR-009: 50 m profile bins, no clipping, gradient bands, climbs.
+-   ADR-010: jitter-filtered distance (3 m minimum displacement).
+
+Planned:
+
+-   ADR-002: SQLite first; PostGIS only for spatial queries (Phase 3).
+-   ADR-003: GPX (`trk` and `rte`) as the only input format for MVP.
+-   ADR-005: scenario method `din33466` and its units (Phase 4).
+-   ADR-006: when to introduce background workers.

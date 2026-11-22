@@ -39,12 +39,23 @@ is ambiguous.
 These files motivate the decisions below. Personal activity files belong
 in `data/local/` (git-ignored); see ARCHITECTURE.md §10.
 
-| File | Kind | Creator | Points | Spacing (median) | Time | Elevation | Distance | Notes |
+| File | Kind | Creator | Points | Spacing (median) | Time | Elevation | Raw step sum | Notes |
 |---|---|---|---|---|---|---|---|---|
 | `input.gpx` | planned | mapy.com | 531 | 9.5 m | none | integer m, terrain model | 6.80 km | Nebelhorn ascent; 45 steps above 45 % step gradient (max 414 %) caused by 1 m rounding over sub-metre steps |
 | `input2.gpx` | planned | mapy.com | 374 | 14.9 m | none | integer m, terrain model | 6.73 km | |
 | `Nebelhorn_push.gpx` | activity | StravaGPX | 13,473 | 0.6 m | 1 Hz | 0.1 m, likely barometric | 9.91 km | Same summit as `input.gpx`, different path; 4,539 zero-length steps (stopped) |
 | `Gleitweg_Seealpsee_Zeigersattel.gpx` | activity | StravaGPX | 24,827 | 1.0 m | 1 Hz | 0.1 m, likely barometric | 23.64 km | Recording gaps up to 819 s; isolated steps up to 11.6 m/s (GPS jumps) |
+
+Independent reference values reported by Strava for the two activities
+(provided by the owner), used to calibrate ADR-007 and ADR-010:
+
+| Activity | Distance | Moving time | Elapsed time | Elevation gain |
+|---|---|---|---|---|
+| Nebelhorn_push | 8.30 km | 2:28:22 | 3:55:01 | 1,443 m |
+| Gleitweg, Seealpsee, Zeigersattel | 20.8 km | 5:01:29 | 7:26:22 | 1,309 m |
+
+ALPHA 0.2.0 gives 8.33 km / 2:29 and 20.86 km / 5:04. Strava's gain is
+not reproducible from the exported elevation (ADR-004).
 
 Consequences:
 
@@ -53,8 +64,10 @@ Consequences:
     counts**.
 -   Planned and recorded elevation have different noise, so the
     elevation source must be stored and may select different defaults.
--   A large share of activity steps are stationary; moving time and GPS
-    jitter while stopped must be handled explicitly.
+-   A large share of activity steps are stationary, and 1 Hz position
+    noise is as large as the distance walked per second. Summing raw
+    steps overstates distance by 14--20 % (ADR-010), and moving time
+    needs an explicit definition (ADR-007).
 
 ## 4. Domain model (Python)
 
@@ -125,95 +138,135 @@ All parameters below are **provisional defaults**. Each is part of the
 analysis parameter set (§6) and is settled in the referenced ADR using
 the reference data in §3.
 
-### 5.1 Distance
+### 5.1 Distance (ADR-010)
 
--   `distance_m`: sum of **2D geodesic** step lengths on the WGS84
+-   `distance_m`: **jitter-filtered 2D geodesic** distance on the WGS84
     ellipsoid, within source segments only. This is the canonical
-    distance.
--   `distance_3d_m`: same with elevation change included; reported as
-    secondary (1--3 % longer on the reference routes).
+    distance for planned and recorded tracks alike.
+    -   Within each source segment, the first point is accepted. Each
+        later point is accepted once it is at least `distance_min_step_m`
+        (default 3 m) from the last accepted point.
+    -   Distance is summed between accepted points.
+    -   Matches Strava within 0.3 % on both reference activities; changes
+        planned routes by ≤ 0.1 %.
+-   `distance_raw_m`: unfiltered sum of every within-segment step, kept
+    for transparency (14--20 % longer on 1 Hz recordings).
+-   `distance_3d_m`: same accepted points, with elevation change included
+    (`sqrt(d² + Δh²)`). `None` unless every point has elevation.
 -   Steps flagged as GPS jumps (§8) are kept but counted in a warning;
     the warning reports how much distance they contribute.
--   Known limitation: GPS jitter while stationary adds distance on
-    activities. Whether stationary intervals are excluded is decided in
-    ADR-007.
+-   `distance_while_stopped_m` (§5.4) shows how much filtered distance
+    falls in stopped time.
 
-### 5.2 Elevation and ascent/descent
+### 5.2 Elevation and ascent/descent (ADR-004)
 
--   `ele_raw_m` is never modified. Processed elevation is a separate
-    array.
--   Ascent/descent use a **hysteresis threshold**: a change counts only
-    once elevation has moved at least `ascent_threshold_m` from the last
-    accepted reference point. Default: 3 m for all sources (ADR-004).
-    On the reference activities this changes gain by about 1 %
-    (1,384 → 1,372 m).
--   `min_elevation_m`, `max_elevation_m` come from raw elevation, with
-    flagged spikes excluded and reported.
--   If any source segment lacks elevation, ascent/descent are `None`
-    for the track, not partial sums, unless a coverage percentage is
-    reported with them.
+-   `ele_raw_m` is never modified.
+-   Ascent/descent use a **hysteresis threshold** per source segment: a
+    turning point is confirmed once elevation reverses by at least
+    `ascent_threshold_m` (default 3 m) from the running extreme. A
+    confirmed climb is counted in full, peak to trough. On the reference
+    activities 3 m lowers gain by about 0.5 % (1,384 → 1,377 m); planned
+    routes are unaffected.
+-   `min_elevation_m`, `max_elevation_m`: from raw elevation. Elevation
+    spikes are flagged (§8) but not yet excluded.
+-   If any point lacks elevation, all elevation metrics are `None`, not
+    partial sums.
 
-### 5.3 Profile bins and gradient
+### 5.3 Profile bins and gradient (ADR-009)
 
--   The track is resampled every `profile_bin_m` metres of horizontal
-    distance (default 50 m) by linear interpolation along the track.
--   `gradient_percent = (ele_end_m - ele_start_m) / horizontal_length_m * 100`
-    per profile bin.
--   Gradient is **not clipped**. Bins above `gradient_outlier_percent`
-    (default 100 %) are flagged `GRADIENT_OUTLIER` for review, not
-    altered.
+-   Bins are fixed `profile_bin_m` (default 50 m) slices of the
+    **filtered** horizontal cumulative distance (§5.1), which does not
+    grow across source-segment boundaries. Bins therefore add up to
+    `distance_m`. The last bin may be shorter.
+-   Elevation and time are interpolated linearly **per source segment**.
+    `ele_change_m` and `elapsed_s` sum only within-segment changes, so a
+    jump between segments is never a gradient or time.
+    `ele_start_m`/`ele_end_m` are interpolated at the bin edges.
+-   `gradient_percent = ele_change_m / bin_length_m * 100`. `None` when
+    elevation is incomplete, or for a last bin shorter than half
+    `profile_bin_m`.
+-   Gradient is **not clipped**. Bins steeper than
+    `gradient_outlier_percent` (default 100 %) raise `GRADIENT_OUTLIER`
+    with their bin indices; values are not altered.
 -   This is a track-derived gradient, not the slope of the surrounding
     terrain.
 
-### 5.4 Time (activities only)
+### 5.4 Time (activities only, ADR-007)
+
+Every second is assigned to exactly one category:
+`elapsed_time_s = moving_time_s + stopped_time_s + recording_gap_s`.
 
 -   `elapsed_time_s`: last timestamp − first timestamp.
--   `recording_gap_s`: sum of step durations above `gap_threshold_s`
-    (default 60 s); usually auto-pause or signal loss.
--   `moving_time_s`: sum of step durations that are not gaps and not
-    inside a stop. A **stop** is an interval of at least
-    `stop_min_duration_s` (default 60 s) during which the track stays
-    within `stop_radius_m` (default 10 m) of its start. A speed
-    threshold alone is not used, because steep uphill walking can be
-    slower than 0.3 m/s horizontally (ADR-007).
--   `stopped_time_s = elapsed_time_s - moving_time_s - recording_gap_s`.
--   For planned routes these values are `None` (unknown), never zero.
+-   `recording_gap_s`: steps longer than `quality.gap_threshold_s`
+    (default 60 s), plus every step crossing a source-segment boundary.
+-   **Windowed speed** at each point: 3D displacement across a centred
+    window of `moving_window_s` seconds (default 20 s), divided by the
+    time it spans. The window never crosses a recording gap.
+-   `moving_time_s`: non-gap steps whose starting point's windowed speed
+    exceeds `moving_min_speed_m_s` (default 0.3 m/s).
+-   `stopped_time_s`: all other non-gap steps.
+-   `stop_count`: runs of stopped steps lasting at least
+    `stop_min_duration_s` (default 60 s).
+-   `distance_while_stopped_m`: filtered distance credited during
+    stopped steps (included in `distance_m`).
+-   `None` (unknown), never zero, for planned routes, partial timestamps,
+    or timestamps running backwards.
+-   Matches Strava within 1 % on both reference activities. Movement
+    slower than 0.3 m/s (3D) counts as stopped; see ADR-007.
 
 ### 5.5 Climb sections
 
-A climb section is a maximal run of profile bins with
-`gradient_percent >= climb_min_gradient_percent` (default 8 %),
-allowing interruptions of up to `climb_max_interruption_m` (default
-150 m), and kept only if its net ascent is at least
-`climb_min_ascent_m` (default 50 m). Descents are defined
-symmetrically. Each section reports start/end distance, length, ascent,
-mean gradient, and steepest bin.
+A climb section is a run of profile bins with
+`gradient_percent >= climb_min_gradient_percent` (default 8 %) in one
+direction.
+
+-   Milder bins are bridged when they total at most
+    `climb_max_interruption_m` (default 150 m) in a row.
+-   A bin steep in the opposite direction, or without a gradient, always
+    ends the section, so up and down sections never overlap.
+-   The section starts and ends on a steep bin.
+-   The net elevation change in the section's direction (interruptions
+    included) must be at least `climb_min_elevation_change_m` (default
+    50 m).
+-   Each section reports direction, start/end distance, net change,
+    mean gradient (signed), steepest bin gradient, and first/last bin.
 
 ### 5.6 Gradient distribution
 
-Share of horizontal distance per gradient band, computed from profile
-bins. Fixed bands so tracks are comparable:
+Horizontal distance per gradient band, from profile bins. The bands are
+fixed and half-open (`[low, high)`), and the result always contains every
+band plus `unknown`, so tracks are comparable:
 
-`< -25 | -25..-15 | -15..-5 | -5..5 | 5..15 | 15..25 | 25..40 | > 40` (%)
+`< -25 | -25..-15 | -15..-5 | -5..5 | 5..15 | 15..25 | 25..40 | >= 40 | unknown` (%)
 
 ## 6. Analysis contract
 
+Implemented in `alpha.domain.analysis`; `analyse(track, params) ->
+Analysis` is a pure function.
+
 ``` python
+ALGORITHM_VERSION = "0.2.0"
+
 @dataclass(frozen=True)
-class AnalysisParams:
-    quality: QualityParams = QualityParams()   # §8; implemented in Phase 1
+class AnalysisParams:                 # validated in __post_init__
+    quality: QualityParams = field(default_factory=QualityParams)  # §8.2
     profile_bin_m: float = 50.0
     ascent_threshold_m: float = 3.0
     gradient_outlier_percent: float = 100.0
-    stop_min_duration_s: float = 60.0
-    stop_radius_m: float = 10.0
+    distance_min_step_m: float = 3.0  # ADR-010
+    moving_window_s: float = 20.0     # ADR-007
+    moving_min_speed_m_s: float = 0.3 # ADR-007
+    stop_min_duration_s: float = 60.0 # only for stop_count
     climb_min_gradient_percent: float = 8.0
     climb_max_interruption_m: float = 150.0
-    climb_min_ascent_m: float = 50.0
+    climb_min_elevation_change_m: float = 50.0
+
+def params_hash(params) -> str:       # SHA-256 of canonical JSON (sorted keys)
 
 @dataclass(frozen=True)
-class TrackSummary:
-    distance_m: float
+class TrackSummary:                   # None = unknown, never zero
+    distance_m: float                 # jitter-filtered
+    distance_raw_m: float             # unfiltered
     distance_3d_m: float | None
     ascent_m: float | None
     descent_m: float | None
@@ -223,6 +276,8 @@ class TrackSummary:
     moving_time_s: float | None
     stopped_time_s: float | None
     recording_gap_s: float | None
+    stop_count: int | None
+    distance_while_stopped_m: float | None
 
 @dataclass(frozen=True)
 class ProfileBin:
@@ -231,33 +286,60 @@ class ProfileBin:
     end_distance_m: float
     ele_start_m: float | None
     ele_end_m: float | None
+    ele_change_m: float | None        # within-segment change only
     gradient_percent: float | None
-    elapsed_s: float | None        # activities only
+    elapsed_s: float | None           # activities only
 
 @dataclass(frozen=True)
 class ClimbSection:
-    direction: str                 # "up" | "down"
+    direction: Direction              # "up" | "down"
     start_distance_m: float
     end_distance_m: float
-    ascent_m: float                # net, positive for both directions
-    mean_gradient_percent: float
-    max_bin_gradient_percent: float
+    elevation_change_m: float         # net, in the section's direction
+    mean_gradient_percent: float      # signed
+    max_bin_gradient_percent: float   # signed, steepest in the direction
+    start_bin: int
+    end_bin: int                      # inclusive
 
 @dataclass(frozen=True)
 class Analysis:
-    algorithm_version: str         # e.g. "0.1.0"
+    algorithm_version: str
     params: AnalysisParams
-    params_hash: str               # SHA-256 of canonical JSON of params
+    params_hash: str
     summary: TrackSummary
     profile: tuple[ProfileBin, ...]
     climbs: tuple[ClimbSection, ...]
-    gradient_distribution: dict[str, float]   # band label -> distance_m
-    warnings: tuple[QualityWarning, ...]
+    gradient_distribution: dict[str, float]   # band label -> metres
+    warnings: tuple[QualityWarning, ...]      # check_track + GRADIENT_OUTLIER
 ```
 
 Two analyses are comparable only if `algorithm_version` and
 `params_hash` match. The comparison use case recomputes when they do
 not.
+
+### 6.1 Report format (`alpha.report`, `alpha analyse --json`)
+
+JSON with `format_version: "2"` (2 added `distance_raw_m` and renamed
+`distance_in_stops_m` to `distance_while_stopped_m`):
+
+-   `file`: name, SHA-256, size, creator, GPX version, waypoint count.
+-   `warnings`: file-level warnings.
+-   `tracks[]`, each with:
+    -   `source`: `trk`/`rte` and index;
+    -   `read_warnings`;
+    -   `track`: kind and elevation source, each with `inferred_by`;
+        point count; coverage;
+    -   `analysis`: version, params hash, full params;
+    -   `summary`;
+    -   `gradient_distribution_m`;
+    -   `climb_sections`;
+    -   `profile`;
+    -   `warnings`.
+-   Each summary metric is `{"value", "unit", "provenance"}`, where
+    provenance is `calculated`, or `unknown` with `value: null`.
+-   Floats are rounded only here (0.1 m, 0.1 s, 0.01 %). The output is
+    byte-identical for the same input and params.
+-   No coordinates are included.
 
 ## 7. Comparison and scenario contracts
 
@@ -399,12 +481,13 @@ class QualityParams:
 | `ELEVATION_SPIKE_DETECTED` | Vertical speed > `max_vertical_speed_m_s` [3 m/s] within a source segment | `check_track` |
 | `SOURCE_SEGMENT_GAP` | Boundary between source segments spans > `source_segment_gap_m` [100 m] | `check_track` |
 | `KIND_INFERRED` / `ELEVATION_SOURCE_INFERRED` | Value guessed by heuristic, not stated by the user | `check_track` |
-| `GRADIENT_OUTLIER` | Profile-bin gradient > `gradient_outlier_percent` | analysis (Phase 2) |
+| `GRADIENT_OUTLIER` | Profile-bin gradient steeper than ±`gradient_outlier_percent` [100 %]; uses `bin_indices` | `analyse` |
 
 Conventions:
 
 -   Point indices refer to the track arrays; for step-based warnings
-    the index is the first point of the step.
+    the index is the first point of the step. Analysis warnings refer
+    to profile bins through `bin_indices` instead.
 -   Time-based checks need both timestamps of a step, so planned routes
     never get them.
 -   Steps that cross a source-segment boundary are excluded from gap,
@@ -472,13 +555,14 @@ rebuilt from it.
 ### `profile_bins`
 
 -   `analysis_id`, `bin_index`, `start_distance_m`, `end_distance_m`,
-    `ele_start_m`, `ele_end_m`, `gradient_percent`, `elapsed_s`
+    `ele_start_m`, `ele_end_m`, `ele_change_m`, `gradient_percent`,
+    `elapsed_s`
 
 ### `climb_sections`
 
 -   `analysis_id`, `section_index`, `direction`, `start_distance_m`,
-    `end_distance_m`, `ascent_m`, `mean_gradient_percent`,
-    `max_bin_gradient_percent`
+    `end_distance_m`, `elevation_change_m`, `mean_gradient_percent`,
+    `max_bin_gradient_percent`, `start_bin`, `end_bin`
 
 ### `scenarios`
 

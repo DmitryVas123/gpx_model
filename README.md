@@ -1,8 +1,8 @@
 # ALPHA --- Mountain Decision Intelligence
 
 **Language:** Python\
-**Status:** Phase 1 complete (GPX reading, quality checks, `alpha inspect`). Analysis
-code still lives in the exploration script `scripts/explore.py`; see
+**Status:** Phase 2 complete (deterministic analysis, `alpha analyse`). Next:
+persistence and comparison (Phase 3); see
 [MVP_ROADMAP.md](MVP_ROADMAP.md) for the current state.
 
 ALPHA analyses GPX planned routes and recorded activities. It
@@ -36,12 +36,25 @@ pip install -e ".[dev]"           # add ,explore for scripts/explore.py
 ruff check . && ruff format --check . && mypy && pytest
 ```
 
-`alpha inspect FILE.gpx` lists the tracks in a file with their
-inferred kind, elevation source, and data-quality warnings.
+### Command line
 
-`python scripts/explore.py [file.gpx]` runs the exploration script
-(defaults to `data/samples/input2.gpx`) and opens the profile in a
-browser.
+``` bash
+alpha inspect FILE.gpx        # tracks, inferred kind/elevation source, data-quality warnings
+alpha analyse FILE.gpx        # distance, ascent, time, gradient distribution, climb sections
+alpha analyse FILE.gpx --json # full versioned report incl. 50 m profile (DATA_MODEL.md §6.1)
+alpha analyse FILE.gpx --moving-min-speed-m-s 0.25 --profile-bin-m 25   # change assumptions
+```
+
+Every result states the algorithm version and a hash of the parameters
+used; results are comparable only when both match. Metric definitions
+are in [DATA_MODEL.md](DATA_MODEL.md) §5 and the reasoning behind the
+defaults in `docs/adr/`.
+
+If an intended change alters results, bump `ALGORITHM_VERSION` and
+refresh the golden outputs with `pytest tests/regression --update-golden`.
+
+`python scripts/explore.py [file.gpx]` runs the old exploration script
+(plotting sandbox; its numbers are not authoritative).
 
 ## Data
 

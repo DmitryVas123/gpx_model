@@ -1,6 +1,7 @@
 """Builders for synthetic tracks and GPX documents (no real locations)."""
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from typing import Any
 
 import numpy as np
 import numpy.typing as npt
@@ -11,7 +12,7 @@ from alpha.domain.track import ElevationSource, Inference, Track, TrackKind
 LAT0 = 46.0
 LON0 = 8.0
 
-Floats = Sequence[float] | npt.NDArray[np.float64]
+Floats = Sequence[float] | npt.NDArray[Any]
 
 
 def make_track(
@@ -85,3 +86,27 @@ def trk(
         head += f"<type>{type_}</type>"
     segs = "".join(f"<trkseg>{''.join(points)}</trkseg>" for points in segments)
     return f"<trk>{head}{segs}</trk>"
+
+
+# Degrees of latitude per metre near LAT0 (approximate; tests that need exact
+# distances measure them with cumulative_distance_m instead).
+DEG_PER_METRE = 1 / 111_150.0
+
+
+def line_track(
+    spacing_m: float,
+    length_m: float,
+    ele_of_distance: Callable[[npt.NDArray[np.float64]], npt.NDArray[np.float64]]
+    | None = None,
+    seconds_per_point: float | None = None,
+) -> Track:
+    """Straight track due north with points every ~``spacing_m`` metres and
+    elevation given as a function of horizontal distance from the start."""
+    from alpha.domain.profile import cumulative_distance_m
+
+    n = round(length_m / spacing_m) + 1
+    lat = LAT0 + np.arange(n) * spacing_m * DEG_PER_METRE
+    distance = cumulative_distance_m(make_track(lat))
+    ele = ele_of_distance(distance) if ele_of_distance else None
+    time = np.arange(n) * seconds_per_point if seconds_per_point else None
+    return make_track(lat, ele=ele, time=time)
