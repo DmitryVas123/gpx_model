@@ -61,6 +61,8 @@ alpha scenarios 1 --break-min 30          # DIN 33466 estimate range + observed 
 alpha scenarios 1 --horizontal-speed-km-h 5 --ascent-rate-m-h 500   # your own assumptions
 alpha baseline                            # personal speeds: one multiplier (5 routes), flat/vertical (8)
 alpha scenarios 1 --personal --break-min 30   # estimate with your fitted speeds and own range
+alpha explain scenarios 1 --personal          # the same in plain language (templates)
+alpha explain baseline --llm                  # reworded by a local Ollama model, numbers checked
 alpha enrich 3                # DEM elevation (opt-in download) vs recorded elevation
 alpha enrich --all            # every track that has no DEM elevation yet
 alpha show 3 --elevation dem:COP30         # any analysis on the DEM series instead
@@ -107,6 +109,7 @@ CC BY 4.0 (ADR-013).
 
 ``` bash
 alpha serve                   # http://127.0.0.1:8000  (page at /, API docs at /docs)
+alpha serve --llm-model llama3.1:8b   # model for "Reword with local model" on the page
 ```
 
 The page imports files, lists tracks, draws the elevation and gradient

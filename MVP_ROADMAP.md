@@ -313,6 +313,38 @@ within a few percent.
     coordinates; opt-in.
 -   Explains, never calculates; structured output referencing metric
     names; validated against the analysis.
+-   ✅ Step 1 (ADR-020): `alpha explain scenarios|elevation|baseline
+    [ID]`.
+    -   Template explanations from the JSON reports: facts with keys and
+        provenance; statements cite them. This is the default, free and
+        exact.
+    -   `--llm`: a local Ollama model (default `llama3.1:8b`, loopback
+        only, no cost, no data leaves the computer) rewords the draft as
+        JSON statements.
+    -   The validator checks fact keys, every duration and number, and
+        forbidden topics. On failure the template is shown, with the
+        reasons.
+    -   CUDA failure → CPU retry, with a note.
+    -   Report format 11.
+-   ✅ Step 2: `GET /tracks/{id}/explanation`, `GET /baseline/explanation`,
+    `alpha serve --llm-model`, and Explain buttons on the page (template
+    at once, local model on request). Caveats are fixed text that is never
+    reworded. On the GPU: about 16–18 s per explanation.
+
+-   ✅ Step 3: the validator checks citations. A number must belong to a
+    fact the statement cites, and cited facts must be stated, so a right
+    number with the wrong meaning is rejected. Tolerances follow display
+    precision; completeness is checked. With the real model, 5 of 5
+    explanations were accepted.
+
+**Phase 8: closed (2026-11-24).** All exit criteria are met (ADR-020).
+Optional later work, not needed for the phase:
+-   an evaluation script comparing models and prompts by acceptance rate
+    and latency;
+-   explanations for plan-vs-activity comparison and track analysis (the
+    same pattern: facts, template, caveats);
+-   German output tried with the real model;
+-   keeping the model loaded between clicks (Ollama `keep_alive`).
 
 ### Phase 9 --- Platform
 

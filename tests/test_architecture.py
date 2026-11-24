@@ -136,15 +136,63 @@ def test_web_frameworks_only_in_api(path: Path) -> None:
         )
 
 
-NETWORK_AND_RASTER = ("rasterio", "urllib", "http", "socket", "requests", "httpx")
+NETWORK = ("urllib", "http", "socket", "requests", "httpx")
 
 
 @pytest.mark.parametrize("path", _python_files(SRC), ids=lambda p: p.name)
-def test_network_and_rasters_only_in_dem_adapter(path: Path) -> None:
-    """External data access stays in one opt-in adapter (ADR-012)."""
+def test_rasters_only_in_dem_adapter(path: Path) -> None:
+    """Raster access stays in the DEM adapter (ADR-012)."""
     if (SRC / "dem") in path.parents:
         return
     for module, _ in _imports(path):
-        assert module.split(".")[0] not in NETWORK_AND_RASTER, (
-            f"{path.relative_to(SRC)}: {module} may only be imported in alpha.dem"
+        assert module.split(".")[0] != "rasterio", (
+            f"{path.relative_to(SRC)}: rasterio may only be imported in alpha.dem"
         )
+
+
+@pytest.mark.parametrize("path", _python_files(SRC), ids=lambda p: p.name)
+def test_network_only_in_adapters(path: Path) -> None:
+    """Network access only in the opt-in adapters: DEM downloads (ADR-012) and
+    the local language model (ADR-020)."""
+    if (SRC / "dem") in path.parents or (SRC / "llm") in path.parents:
+        return
+    for module, _ in _imports(path):
+        assert module.split(".")[0] not in NETWORK, (
+            f"{path.relative_to(SRC)}: {module} may only be imported in alpha.dem "
+            "or alpha.llm"
+        )
+
+
+def test_explain_is_pure() -> None:
+    """Explanations are built from report JSON only (ADR-020)."""
+    allowed = (
+        "alpha.explain",
+        "re",
+        "json",
+        "math",
+        "dataclasses",
+        "typing",
+        "collections",
+        "__future__",
+    )
+    for path in _python_files(SRC / "explain"):
+        for module, level in _imports(path):
+            assert level == 0, f"{path.name}: use absolute imports"
+            assert any(module == a or module.startswith(a + ".") for a in allowed), (
+                f"alpha.explain/{path.name} must not import {module}"
+            )
+
+
+def test_llm_adapter_only_talks_to_this_computer() -> None:
+    import pytest as _pytest
+
+    from alpha.llm import OllamaRewriter
+
+    for url in (
+        "http://example.org:11434",
+        "https://127.0.0.1:11434",
+        "http://10.0.0.5",
+    ):
+        with _pytest.raises(ValueError, match="local"):
+            OllamaRewriter(base_url=url)
+    OllamaRewriter(base_url="http://localhost:11434")

@@ -27,6 +27,7 @@ from alpha.domain.reference_elevation import ElevationDrift
 from alpha.domain.scenarios import DinAssumptions, ScenarioResult
 from alpha.domain.terrain import TerrainSlopeSummary
 from alpha.domain.track import Track
+from alpha.explain import Explanation
 from alpha.gpx.reader import GpxDocument, SourceTrack
 from alpha.modelling import SampleResult, Validation
 from alpha.persistence import DemProfileRecord, TrackRecord
@@ -40,7 +41,8 @@ from alpha.persistence import DemProfileRecord, TrackRecord
 # 8: baseline report holds two models ("models": multiplier, split)
 # 9: track records gained "effort"; baseline report gained "effort"
 # 10: scenario report gained "personal" (fitted assumptions, ADR-019)
-REPORT_FORMAT_VERSION = "10"
+# 11: explanation report (ADR-020)
+REPORT_FORMAT_VERSION = "11"
 
 
 def elevation_series_report(dem: DemProfileRecord | None) -> dict[str, Any]:
@@ -623,4 +625,30 @@ def _personal_report(p: PersonalAssumptions | None) -> dict[str, Any] | None:
         "loo_median_abs_error": round(p.median_abs_error, 4),
         "range_multipliers": [round(k, 4) for k in p.range_multipliers],
         "range_meaning": "95 % range for a single new hike (own variation)",
+    }
+
+
+def explanation_report(e: Explanation, notes: Sequence[str] = ()) -> dict[str, Any]:
+    """A plain-language explanation and the facts it may use (ADR-020)."""
+    return {
+        "format_version": REPORT_FORMAT_VERSION,
+        "topic": e.topic,
+        "source": e.source,
+        "model": e.model,
+        "statements": [
+            {"text": s.text, "facts": list(s.facts), "caveat": s.caveat}
+            for s in e.statements
+        ],
+        "boundary": e.boundary,
+        "fallback_reasons": list(e.fallback_reasons),
+        "notes": list(notes),
+        "facts": [
+            {
+                "key": f.key,
+                "label": f.label,
+                "display": f.display(),
+                "provenance": f.provenance,
+            }
+            for f in (e.facts or ())
+        ],
     }

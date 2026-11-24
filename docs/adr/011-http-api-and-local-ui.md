@@ -34,6 +34,7 @@ local-first, and the data (personal activities) is sensitive.
     | `GET /comparisons?a=&b=` | Comparison; a GET because nothing is created (analyses are only cached) |
     | `GET /tracks/{id}/scenarios` | DIN 33466 range; repeat `speed_multiplier` for a custom range; `assumptions=personal` (ADR-019) |
     | `GET /baseline` | Personal speed models and validation (ADR-016 to ADR-019) |
+    | `GET /tracks/{id}/explanation`, `GET /baseline/explanation` | Explanations; `llm=true` asks the local Ollama model (ADR-020) |
     | `GET /dem/datasets` | DEM datasets and whether downloads are available (ADR-012) |
     | `POST /tracks/{id}/dem` | Sample, store, and compare DEM elevation; downloads only missing tiles (ADR-012) |
     | `GET /tracks/{id}/dem/{dataset}` | Elevation check from the stored profile; no network |

@@ -544,3 +544,33 @@ class Baseline(Strict):
     effort: BaselineEffort
     activities: list[BaselineActivity]
     excluded: list[BaselineExcluded]
+
+
+# --- explanations (Phase 8, ADR-020) ---------------------------------------------
+
+
+class ExplanationStatement(Strict):
+    text: str
+    facts: list[str]
+    caveat: bool = Field(description="fixed qualification, never reworded by a model")
+
+
+class ExplanationFact(Strict):
+    key: str
+    label: str
+    display: str
+    provenance: str
+
+
+class Explanation(Strict):
+    format_version: str
+    topic: Literal["scenarios", "elevation", "baseline"]
+    source: Literal["template", "model"]
+    model: str | None
+    statements: list[ExplanationStatement]
+    boundary: str
+    fallback_reasons: list[str] = Field(
+        description="why a model's answer was not used (template shown instead)"
+    )
+    notes: list[str]
+    facts: list[ExplanationFact]

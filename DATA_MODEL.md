@@ -381,7 +381,7 @@ not.
 
 ### 6.1 Report format (`alpha.report`, `alpha analyse --json`)
 
-JSON with `format_version: "10"`:
+JSON with `format_version: "11"`:
 
 -   2 added `distance_raw_m` and renamed `distance_in_stops_m` to
     `distance_while_stopped_m`.
@@ -413,6 +413,7 @@ JSON with `format_version: "10"`:
     and an `effort` section to the baseline report (§7.5, ADR-018).
 -   10 added `personal` to scenario reports (§7.6, ADR-019): null for
     preset or user assumptions.
+-   11 added the explanation report (§7.7, ADR-020).
 
 The report itself contains:
 
@@ -703,6 +704,40 @@ class BaselineParams:
 -   JSON `personal`: `provenance` = `fitted`, `model`, `n_activities`,
     `n_routes`, `effort`, `loo_median_abs_error`, `range_multipliers`,
     `range_meaning`.
+
+### 7.7 Explanations (ADR-020)
+
+-   `Fact`: `key` (dotted, stable), `label`, `value`, `unit` (`duration`,
+    `km`, `m`, `m/h`, `km/h`, `factor`, `percent`, `deg`, `count`, or
+    `text`), `provenance` (`calculated`, `estimated`, `observed`,
+    `fitted`, `reference`, or `label`), and `display()` (e.g. `3:53 h`,
+    `8.33 km`, `x1.46`).
+-   `Statement`: `text`, `facts` (the keys it cites), and `caveat`
+    (a fixed qualification, never sent to a model and shown verbatim).
+-   `explain(topic, report, rewrite=None, model=None, language="English")
+    -> Explanation`:
+    -   `topic` is `scenarios`, `elevation`, or `baseline`;
+    -   `report` is the JSON of `alpha scenarios`, `alpha enrich`, or
+        `alpha baseline` (`--json`).
+-   `Explanation`:
+    -   `topic`, `statements`;
+    -   `source` (`template` | `model`), `model`;
+    -   `boundary` (fixed text from ALPHA);
+    -   `fallback_reasons` (why a model answer was not used), `facts`.
+-   Validation of model text (ADR-020):
+    -   cited keys must exist;
+    -   durations must match a duration fact within 1 min;
+    -   other numbers must match a fact within half a unit of its display
+        precision, including derived forms (a factor as a percentage);
+    -   forbidden topics are rejected;
+    -   at least as many statements as the draft (without caveats);
+    -   per statement, every cited numeric fact must be stated, and every
+        number must belong to a cited fact or be template wording;
+    -   every numeric fact of the draft must reappear.
+-   JSON: `alpha.report.explanation_report`: `topic`, `source`, `model`,
+    `statements[{text, facts, caveat}]`, `boundary`, `fallback_reasons`,
+    `notes`,
+    and `facts[{key, label, display, provenance}]`.
 
 ## 8. Data quality
 

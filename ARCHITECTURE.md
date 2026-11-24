@@ -87,6 +87,8 @@ gpx_model/
 │   │   ├── scenarios.py      # estimate_duration + observed times
 │   │   ├── elevation.py      # enrich_track, elevation_check (DEM)
 │   │   └── baseline.py       # personal_baseline: samples -> modelling
+│   ├── explain/              # Phase 8: facts, templates, validator (pure, ADR-020)
+│   ├── llm/                  # Phase 8: local Ollama adapter (loopback only)
 │   ├── modelling/            # Phase 7: pure fitting on samples; imports only
 │   │   │                     # numpy + domain (ADR-005)
 │   │   ├── baseline.py       # model 1: one speed multiplier (ADR-016)
@@ -269,6 +271,8 @@ Implemented in `alpha.application.tracks` (ADR-002).
 | `GET /comparisons?a=&b=` | Compare b against a |
 | `GET /tracks/{id}/scenarios` | DIN 33466 range + observed times; `assumptions=personal` for fitted speeds |
 | `GET /baseline` | Personal speed models (ADR-016 to ADR-019) |
+| `GET /tracks/{id}/explanation?topic=` | Plain-language explanation; `llm=true` rewords locally (ADR-020) |
+| `GET /baseline/explanation` | The same for the personal speeds |
 | `GET /dem/datasets` | DEM datasets, `downloads_available` |
 | `POST /tracks/{id}/dem` | Enrich with DEM elevation (downloads missing tiles only) |
 | `GET /tracks/{id}/dem/{dataset}` | Elevation check from the stored profile (no network) |
@@ -317,8 +321,11 @@ environment for it.
 -   Deleting a source file removes all derived rows and the stored copy.
 -   The API binds to localhost by default and has no authentication; the
     web page loads nothing from the internet and inserts data as text only.
--   The only outbound network access is DEM download in `alpha.dem`,
-    always opt-in:
+-   Network access, always opt-in, happens only in two adapters:
+    -   `alpha.llm` (`alpha explain --llm`) talks to a **local** Ollama
+        server on a loopback address and refuses any other host
+        (ADR-020);
+    -   DEM download in `alpha.dem`:
     -   `alpha enrich` (COP30): fixed 0.25° tiles, never the track itself;
     -   `alpha get-tiles --yes` (DGM1 from a metalink): the region the user
         chose, or with `--for-tracks` the 1 km squares the tracks cross

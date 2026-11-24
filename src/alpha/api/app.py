@@ -51,12 +51,15 @@ from alpha.domain.scenarios import (
     ScenarioInputError,
     din_assumptions,
 )
+from alpha.explain import explain
 from alpha.gpx.reader import DEFAULT_MAX_BYTES, GpxReadError, ReadErrorCode
+from alpha.llm import DEFAULT_MODEL, OllamaRewriter
 from alpha.modelling import BaselineParams
 from alpha.report import (
     baseline_report,
     comparison_report,
     elevation_check_report,
+    explanation_report,
     list_item_report,
     record_report,
     scenario_report,
@@ -105,7 +108,11 @@ def _error(status: int, code: str, message: str, details: Any = None) -> JSONRes
     return JSONResponse(status_code=status, content={"error": body})
 
 
-def create_app(data_dir: Path, dem_api_key: str | None = None) -> FastAPI:
+def create_app(
+    data_dir: Path,
+    dem_api_key: str | None = None,
+    llm_model: str = DEFAULT_MODEL,
+) -> FastAPI:
     """``dem_api_key`` enables DEM downloads (``POST /tracks/{id}/dem``). It is
     passed in by the entry point, kept in memory, and never returned or logged."""
 
@@ -124,6 +131,9 @@ def create_app(data_dir: Path, dem_api_key: str | None = None) -> FastAPI:
         app.state.dem_downloads_available = dem_api_key is not None
         # One enrichment at a time: tiles are written to a shared cache.
         app.state.dem_lock = threading.Lock()
+        # The local model runs on request only, one at a time (GPU memory).
+        app.state.llm_model = llm_model
+        app.state.llm_lock = threading.Lock()
         try:
             yield
         finally:
@@ -577,3 +587,102 @@ def _install_routes(app: FastAPI) -> None:
         except ValueError as exc:
             raise ApiError(422, "INVALID_PARAMS", str(exc)) from exc
         return baseline_report(personal_baseline(ws, params, baseline_params))
+
+    # --- explanations (Phase 8, ADR-020) --------------------------------------------
+
+    def _explained(
+        request: Request, topic: str, report: dict[str, Any], llm: bool, language: str
+    ) -> dict[str, Any]:
+        if not llm:
+            return explanation_report(explain(topic, report))
+        model = request.app.state.llm_model
+        rewriter = OllamaRewriter(model)
+        with request.app.state.llm_lock:
+            result = explain(topic, report, rewriter, model=model, language=language)
+        return explanation_report(result, rewriter.notes)
+
+    @app.get(
+        "/tracks/{track_id}/explanation",
+        tags=["explanations"],
+        response_model=schemas.Explanation,
+        responses=ERROR_RESPONSES,
+        summary="Plain-language explanation of scenarios or the elevation check",
+        description=(
+            "Template text by default. llm=true asks the local Ollama model to "
+            "reword it; its text is used only if every number matches the "
+            "report, otherwise the template is returned with the reasons."
+        ),
+    )
+    def track_explanation(
+        track_id: int,
+        request: Request,
+        ws: WorkspaceDep,
+        params: ParamsDep,
+        topic: Literal["scenarios", "elevation"],
+        llm: bool = False,
+        language: str = "English",
+        personal: bool = False,
+        break_min: float = 0.0,
+        dataset: str = DEFAULT_DATASET,
+        effort: str = BaselineParams().effort,
+    ) -> dict[str, Any]:
+        if topic == "elevation":
+            if dataset not in DATASETS:
+                raise ApiError(
+                    422, "INVALID_PARAMS", f"unknown DEM dataset {dataset!r}"
+                )
+            view = elevation_check(ws, track_id, dataset, params)
+            r = view.record
+            report = elevation_check_report(
+                stored_track_ref(r.id, r.source_filename, r.planned_track_id), view
+            )
+            return _explained(request, topic, report, llm, language)
+        if break_min < 0:
+            raise ApiError(422, "INVALID_PARAMS", "break_min must be >= 0")
+        try:
+            baseline_params = BaselineParams(effort=effort)
+        except ValueError as exc:
+            raise ApiError(422, "INVALID_PARAMS", str(exc)) from exc
+        if personal:
+            sv = estimate_personal(
+                ws, track_id, params, baseline_params, break_s=break_min * 60
+            )
+        else:
+            sv = estimate_duration(
+                ws,
+                track_id,
+                din_assumptions(break_s=break_min * 60),
+                DEFAULT_SPEED_MULTIPLIERS,
+                params,
+            )
+        r = sv.record
+        report = scenario_report(
+            stored_track_ref(r.id, r.source_filename, r.planned_track_id),
+            sv.result,
+            sv.observed,
+            sv.dem,
+            sv.personal,
+        )
+        return _explained(request, topic, report, llm, language)
+
+    @app.get(
+        "/baseline/explanation",
+        tags=["explanations"],
+        response_model=schemas.Explanation,
+        responses=ERROR_RESPONSES,
+        summary="Plain-language explanation of the personal speed models",
+    )
+    def baseline_explanation(
+        request: Request,
+        ws: WorkspaceDep,
+        params: ParamsDep,
+        llm: bool = False,
+        language: str = "English",
+        effort: str = BaselineParams().effort,
+    ) -> dict[str, Any]:
+        try:
+            baseline_params = BaselineParams(effort=effort)
+        except ValueError as exc:
+            raise ApiError(422, "INVALID_PARAMS", str(exc)) from exc
+        report = baseline_report(personal_baseline(ws, params, baseline_params))
+        return _explained(request, "baseline", report, llm, language)

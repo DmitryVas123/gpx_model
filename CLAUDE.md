@@ -65,9 +65,13 @@ in MVP_ROADMAP.md.
     `alpha.report`; API schemas mirror it with `extra="forbid"`.
 -   The web page (`api/static/index.html`) inserts server data with
     `textContent` only and loads no external resources.
--   Network access and rasterio only in `alpha.dem`, and only on explicit
-    user request (`alpha enrich`, `alpha get-tiles --yes`, or
-    `POST /tracks/{id}/dem` after a confirmation on the page). Metalinks
+-   rasterio only in `alpha.dem`. Network access only in `alpha.dem` and
+    `alpha.llm`, and only on explicit user request (`alpha enrich`,
+    `alpha get-tiles --yes`, `POST /tracks/{id}/dem` after a confirmation
+    on the page, or `alpha explain --llm`). `alpha.llm` talks only to a
+    local Ollama server on a loopback address. Model text is shown only
+    after `alpha.explain` validated it against the report's facts
+    (ADR-020). Metalinks
     and other downloaded lists are untrusted: plain file names only, known
     HTTPS hosts only, verify what arrives. Tests never use the network. `alpha.api`
     receives the API key from `alpha serve`; it never reads it itself.

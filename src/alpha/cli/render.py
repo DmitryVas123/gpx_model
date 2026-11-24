@@ -16,6 +16,7 @@ from alpha.domain.profile import GRADIENT_BANDS, UNKNOWN_BAND
 from alpha.domain.quality import QualityWarning, check_track
 from alpha.domain.scenarios import SCENARIO_METHODS, DinAssumptions
 from alpha.domain.track import Inference, Track
+from alpha.explain import Explanation
 from alpha.gpx.reader import GpxDocument, SourceTrack
 from alpha.modelling import Validation
 from alpha.persistence import DemProfileRecord, TrackRecord
@@ -822,3 +823,27 @@ def _effort(v: BaselineView, out: TextIO) -> None:
             f"{compared}",
             file=out,
         )
+
+
+# --- explanations (Phase 8) ----------------------------------------------------------
+
+
+def explanation(e: Explanation, notes: Sequence[str], out: TextIO) -> None:
+    import textwrap
+
+    for s in e.statements:
+        print(textwrap.fill(s.text, width=88), file=out)
+        print(file=out)
+    if e.source == "model":
+        print(
+            f"(Worded by the local model {e.model}; every number was checked "
+            "against ALPHA's report.)",
+            file=out,
+        )
+    else:
+        print("(Explained by ALPHA's templates.)", file=out)
+    for reason in e.fallback_reasons:
+        print(f"  The model's text was not used: {reason}", file=out)
+    for note in notes:
+        print(f"  Note: {note}", file=out)
+    print(textwrap.fill(e.boundary, width=88), file=out)

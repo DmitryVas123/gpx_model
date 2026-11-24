@@ -6,10 +6,11 @@ import os
 import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import TextIO
+from typing import Any, TextIO
 
 from alpha.application.baseline import BaselineNotFittedError, personal_baseline
 from alpha.application.elevation import (
+    elevation_check,
     enrich_all,
     enrich_track,
     get_tiles,
@@ -47,13 +48,16 @@ from alpha.domain.scenarios import (
     din_assumptions,
 )
 from alpha.domain.track import Effort, ElevationSource, TrackKind
+from alpha.explain import TOPICS, explain
 from alpha.gpx.reader import GpxDocument, GpxReadError, read_gpx
+from alpha.llm import DEFAULT_MODEL, OllamaRewriter
 from alpha.modelling import EFFORT_SELECTIONS, BaselineParams
 from alpha.persistence import SchemaMismatchError
 from alpha.report import (
     baseline_report,
     comparison_report,
     elevation_check_report,
+    explanation_report,
     file_report,
     scenario_report,
     stored_track_ref,
@@ -271,6 +275,35 @@ def _parser() -> argparse.ArgumentParser:
     )
     sub.add_argument("--yes", action="store_true", help="really download")
 
+    sub = command(
+        "explain",
+        "explain a result in plain language (templates; --llm: local model)",
+        _explain,
+    )
+    sub.add_argument("topic", choices=sorted(TOPICS))
+    sub.add_argument(
+        "track_id", type=int, nargs="?", help="needed for scenarios and elevation"
+    )
+    sub.add_argument(
+        "--llm",
+        action="store_true",
+        help="let the local Ollama model reword it (checked against the report)",
+    )
+    sub.add_argument("--model", default=DEFAULT_MODEL, help="default %(default)s")
+    sub.add_argument("--language", default="English", help="with --llm")
+    sub.add_argument("--personal", action="store_true", help="scenarios: fitted speeds")
+    sub.add_argument("--break-min", type=float, default=0.0, help="scenarios")
+    sub.add_argument(
+        "--dataset", default="BY_DGM1", choices=sorted(DATASETS), help="elevation"
+    )
+    sub.add_argument(
+        "--effort",
+        choices=sorted(EFFORT_SELECTIONS),
+        default=BaselineParams().effort,
+        help="baseline and --personal",
+    )
+    _add_analysis_options(sub)
+
     sub = command("serve", "run the HTTP API and the local web page", _serve)
     sub.add_argument(
         "--host",
@@ -278,6 +311,11 @@ def _parser() -> argparse.ArgumentParser:
         help="default 127.0.0.1 (this computer only; the data is personal)",
     )
     sub.add_argument("--port", type=int, default=8000, help="default 8000")
+    sub.add_argument(
+        "--llm-model",
+        default=DEFAULT_MODEL,
+        help="local Ollama model for 'reword' on the page (default %(default)s)",
+    )
 
     sub = command(
         "delete", "delete a stored GPX file and all its tracks (needs --yes)", _delete
@@ -727,6 +765,74 @@ def _get_tiles(args: argparse.Namespace, out: TextIO) -> int:
     return _with_workspace(args, out, action)
 
 
+def _explain(args: argparse.Namespace, out: TextIO) -> int:
+    if args.topic in ("scenarios", "elevation") and args.track_id is None:
+        print(f"error: 'explain {args.topic}' needs a track ID", file=out)
+        return EXIT_BAD_PARAMS
+    try:
+        params = _params(args)
+        baseline_params = BaselineParams(effort=args.effort)
+    except ValueError as exc:
+        print(f"error: {exc}", file=out)
+        return EXIT_BAD_PARAMS
+
+    def action(ws: Workspace) -> int:
+        try:
+            report = _report_for(args, ws, params, baseline_params)
+        except (ScenarioInputError, BaselineNotFittedError) as exc:
+            print(f"error: {exc}", file=out)
+            return EXIT_INVALID
+        rewriter = OllamaRewriter(args.model) if args.llm else None
+        explanation = explain(
+            args.topic, report, rewriter, model=args.model, language=args.language
+        )
+        notes = rewriter.notes if rewriter is not None else []
+        if args.json:
+            out.write(to_json(explanation_report(explanation, notes)))
+        else:
+            render.explanation(explanation, notes, out)
+        return EXIT_OK
+
+    return _with_workspace(args, out, action)
+
+
+def _report_for(
+    args: argparse.Namespace,
+    ws: Workspace,
+    params: AnalysisParams,
+    baseline_params: BaselineParams,
+) -> dict[str, Any]:
+    """The same JSON report the matching command prints with --json."""
+    if args.topic == "baseline":
+        return baseline_report(personal_baseline(ws, params, baseline_params))
+    if args.topic == "elevation":
+        view = elevation_check(ws, args.track_id, args.dataset, params)
+        r = view.record
+        return elevation_check_report(
+            stored_track_ref(r.id, r.source_filename, r.planned_track_id), view
+        )
+    if args.personal:
+        sv = estimate_personal(
+            ws, args.track_id, params, baseline_params, break_s=args.break_min * 60
+        )
+    else:
+        sv = estimate_duration(
+            ws,
+            args.track_id,
+            din_assumptions(break_s=args.break_min * 60),
+            DEFAULT_SPEED_MULTIPLIERS,
+            params,
+        )
+    r = sv.record
+    return scenario_report(
+        stored_track_ref(r.id, r.source_filename, r.planned_track_id),
+        sv.result,
+        sv.observed,
+        sv.dem,
+        sv.personal,
+    )
+
+
 def _serve(args: argparse.Namespace, out: TextIO) -> int:
     from alpha.api.server import run  # imported lazily: FastAPI is only needed here
 
@@ -746,7 +852,7 @@ def _serve(args: argparse.Namespace, out: TextIO) -> int:
         ),
         file=out,
     )
-    run(args.data_dir, args.host, args.port, key)
+    run(args.data_dir, args.host, args.port, key, args.llm_model)
     return EXIT_OK
 
 
