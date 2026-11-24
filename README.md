@@ -56,8 +56,11 @@ alpha show 3 [--json]         # full analysis of a stored track (same options as
 alpha compare 1 3 [--json]    # track 3 against track 1: metrics, gradient bands, climbs, notes
 alpha edit 3 --planned-track 1             # link an activity to the plan it followed
 alpha edit 1 --kind planned --elevation-source planner_dem   # confirm or correct guesses
+alpha edit 2 --effort hard                # your own judgement; baselines fit normal efforts
 alpha scenarios 1 --break-min 30          # DIN 33466 estimate range + observed times
 alpha scenarios 1 --horizontal-speed-km-h 5 --ascent-rate-m-h 500   # your own assumptions
+alpha baseline                            # personal speeds: one multiplier (5 routes), flat/vertical (8)
+alpha scenarios 1 --personal --break-min 30   # estimate with your fitted speeds and own range
 alpha enrich 3                # DEM elevation (opt-in download) vs recorded elevation
 alpha enrich --all            # every track that has no DEM elevation yet
 alpha show 3 --elevation dem:COP30         # any analysis on the DEM series instead

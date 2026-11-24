@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-from sqlalchemy import create_engine, delete, event, insert, inspect, select
+from sqlalchemy import Select, create_engine, delete, event, insert, inspect, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
@@ -22,7 +22,7 @@ from alpha.domain.analysis import Analysis, AnalysisParams, TrackSummary
 from alpha.domain.climbs import ClimbSection, Direction
 from alpha.domain.profile import ProfileBin
 from alpha.domain.quality import QualityParams, QualityWarning, WarningCode
-from alpha.domain.track import ElevationSource, Inference, Track, TrackKind
+from alpha.domain.track import Effort, ElevationSource, Inference, Track, TrackKind
 from alpha.persistence.schema import (
     ADDITIVE_UPGRADES,
     SCHEMA_VERSION,
@@ -34,6 +34,7 @@ from alpha.persistence.schema import (
     ProfileBinRow,
     SourceFileRow,
     TerrainSlopeRow,
+    TrackAnnotationRow,
     TrackPointRow,
     TrackRow,
 )
@@ -99,6 +100,7 @@ class TrackRecord:
     started_at_utc: datetime | None
     imported_at_utc: datetime
     read_warnings: tuple[QualityWarning, ...]
+    effort: Effort | None = None  # user annotation (ADR-018)
 
 
 @dataclass(frozen=True)
@@ -335,21 +337,24 @@ class Repository:
             self.session.execute(insert(TrackPointRow), points)
         return row.id
 
-    def list_tracks(self) -> list[TrackRecord]:
-        rows = self.session.execute(
-            select(TrackRow, SourceFileRow)
+    def _track_query(
+        self,
+    ) -> Select[TrackRow, SourceFileRow, TrackAnnotationRow]:
+        return (
+            select(TrackRow, SourceFileRow, TrackAnnotationRow)
             .join(SourceFileRow, TrackRow.source_file_id == SourceFileRow.id)
-            .order_by(TrackRow.id)
-        ).all()
-        return [self._track_record(t, s) for t, s in rows]
+            .outerjoin(TrackAnnotationRow, TrackAnnotationRow.track_id == TrackRow.id)
+        )
+
+    def list_tracks(self) -> list[TrackRecord]:
+        rows = self.session.execute(self._track_query().order_by(TrackRow.id)).all()
+        return [self._track_record(t, s, a) for t, s, a in rows]
 
     def get_track(self, track_id: int) -> TrackRecord | None:
         row = self.session.execute(
-            select(TrackRow, SourceFileRow)
-            .join(SourceFileRow, TrackRow.source_file_id == SourceFileRow.id)
-            .where(TrackRow.id == track_id)
+            self._track_query().where(TrackRow.id == track_id)
         ).one_or_none()
-        return None if row is None else self._track_record(row[0], row[1])
+        return None if row is None else self._track_record(row[0], row[1], row[2])
 
     def load_track(self, track_id: int) -> Track:
         row = self.session.get(TrackRow, track_id)
@@ -390,10 +395,19 @@ class Repository:
         elevation_source: ElevationSource | None = None,
         planned_track_id: int | None = None,
         clear_planned_track: bool = False,
+        effort: Effort | None = None,
+        clear_effort: bool = False,
     ) -> None:
         row = self.session.get(TrackRow, track_id)
         if row is None:
             raise KeyError(track_id)
+        if effort is not None or clear_effort:
+            note = self.session.get(TrackAnnotationRow, track_id)
+            if note is None:
+                note = TrackAnnotationRow(track_id=track_id)
+                self.session.add(note)
+            note.effort = None if clear_effort else str(effort)
+            note.updated_at_utc = _now()
         if kind is not None:
             row.kind = str(kind)
             row.kind_inferred_by = str(Inference.USER)
@@ -636,7 +650,9 @@ class Repository:
         )
 
     @staticmethod
-    def _track_record(row: TrackRow, source: SourceFileRow) -> TrackRecord:
+    def _track_record(
+        row: TrackRow, source: SourceFileRow, note: TrackAnnotationRow | None
+    ) -> TrackRecord:
         return TrackRecord(
             id=row.id,
             source_file_id=row.source_file_id,
@@ -656,6 +672,7 @@ class Repository:
             started_at_utc=_as_utc(row.started_at_utc),
             imported_at_utc=source.imported_at_utc.replace(tzinfo=UTC),
             read_warnings=warnings_from_json(row.read_warnings_json),
+            effort=Effort(note.effort) if note is not None and note.effort else None,
         )
 
     @staticmethod

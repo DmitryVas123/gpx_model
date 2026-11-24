@@ -81,7 +81,8 @@ in MVP_ROADMAP.md.
 -   Scenario **methods** (formulas) live in `domain.scenarios`;
     **assumptions** carry their source (`user`, `preset`, `fitted`).
     Fitting and ML belong in a separate `alpha.modelling` package, never
-    in `alpha.domain` (ADR-005).
+    in `alpha.domain` (ADR-005). `alpha.modelling` is pure (numpy and
+    domain only); `alpha.application` collects the samples (ADR-016).
 
 ## 5. Data and calculation rules
 

@@ -11,17 +11,24 @@ from dataclasses import fields
 from datetime import UTC, datetime
 from typing import Any
 
+from alpha.application.baseline import BaselineView, PersonalAssumptions
 from alpha.application.elevation import ElevationView
 from alpha.application.scenarios import ObservedTime
-from alpha.domain.analysis import Analysis, TrackSummary
+from alpha.domain.analysis import (
+    ALGORITHM_VERSION,
+    Analysis,
+    TrackSummary,
+    params_hash,
+)
 from alpha.domain.climbs import ClimbSection
 from alpha.domain.comparison import ComparisonResult
 from alpha.domain.quality import QualityWarning
 from alpha.domain.reference_elevation import ElevationDrift
-from alpha.domain.scenarios import ScenarioResult
+from alpha.domain.scenarios import DinAssumptions, ScenarioResult
 from alpha.domain.terrain import TerrainSlopeSummary
 from alpha.domain.track import Track
 from alpha.gpx.reader import GpxDocument, SourceTrack
+from alpha.modelling import SampleResult, Validation
 from alpha.persistence import DemProfileRecord, TrackRecord
 
 # 2: summary gained distance_raw_m; distance_in_stops_m -> distance_while_stopped_m
@@ -29,7 +36,11 @@ from alpha.persistence import DemProfileRecord, TrackRecord
 # 4: elevation check report; list items gained "dem_datasets"
 # 5: elevation check gained "comparison.drift" and "warnings" (ELEVATION_DRIFT)
 # 6: elevation check gained "terrain_slope" and "terrain_slope_note"
-REPORT_FORMAT_VERSION = "6"
+# 7: personal baseline report (Phase 7)
+# 8: baseline report holds two models ("models": multiplier, split)
+# 9: track records gained "effort"; baseline report gained "effort"
+# 10: scenario report gained "personal" (fitted assumptions, ADR-019)
+REPORT_FORMAT_VERSION = "10"
 
 
 def elevation_series_report(dem: DemProfileRecord | None) -> dict[str, Any]:
@@ -298,6 +309,7 @@ def scenario_report(
     result: ScenarioResult,
     observed: Sequence[ObservedTime],
     dem: DemProfileRecord | None = None,
+    personal: PersonalAssumptions | None = None,
 ) -> dict[str, Any]:
     """Scenario estimates with their assumptions, plus observed times."""
     a = result.assumptions
@@ -354,6 +366,7 @@ def scenario_report(
         ],
         "uncertainty_notes": list(result.uncertainty_notes),
         "elevation_series": elevation_series_report(dem),
+        "personal": _personal_report(personal),
     }
 
 
@@ -381,6 +394,7 @@ def record_report(r: TrackRecord) -> dict[str, Any]:
         "has_elevation": r.has_elevation,
         "has_timestamps": r.has_timestamps,
         "started_at_utc": _iso(r.started_at_utc),
+        "effort": None if r.effort is None else str(r.effort),
         "imported_at_utc": _iso(r.imported_at_utc),
         "read_warnings": [warning_report(w) for w in r.read_warnings],
     }
@@ -461,4 +475,152 @@ def _drift_report(d: ElevationDrift | None) -> dict[str, Any] | None:
         "max_m": _round(d.max_m, 1),
         "max_at_m": _round(d.max_at_m, 0),
         "window_m": d.window_m,
+    }
+
+
+def baseline_report(view: BaselineView) -> dict[str, Any]:
+    """Personal speed models on DIN 33466 (ADR-016, ADR-017). Per-activity
+    ratios are observed; factors, intervals, and errors are fitted."""
+    f, s, bp = view.fit, view.split, view.baseline_params
+    ref = f.reference
+
+    def interval(i: tuple[float, float] | None) -> list[float] | None:
+        return None if i is None else [round(i[0], 3), round(i[1], 3)]
+
+    def assumptions(a: DinAssumptions | None) -> dict[str, Any] | None:
+        if a is None:
+            return None
+        return {
+            "source": str(a.source),
+            "label": a.label,
+            "horizontal_speed_m_h": round(a.horizontal_speed_m_h, 1),
+            "ascent_rate_m_h": round(a.ascent_rate_m_h, 1),
+            "descent_rate_m_h": round(a.descent_rate_m_h, 1),
+        }
+
+    def validation(v: Validation | None) -> dict[str, Any] | None:
+        if v is None:
+            return None
+        return {
+            "method": "leave one route out",
+            "folds": v.folds,
+            "median_abs_error": round(v.median_abs_error, 4),
+            "max_abs_error": round(v.max_abs_error, 4),
+        }
+
+    multiplier = {
+        "status": str(f.status),
+        "min_routes": f.min_groups,
+        "provenance": "fitted" if f.multiplier is not None else None,
+        "speed_multiplier": _round(f.multiplier, 3),
+        "spread_log": _round(f.spread, 4),
+        "average_interval_95": interval(f.average_interval),
+        "single_activity_interval_95": interval(f.single_interval),
+        "assumptions": assumptions(f.assumptions),
+        "validation": validation(f.validation),
+    }
+    split = {
+        "status": str(s.status),
+        "reason": s.reason,
+        "min_routes": s.min_groups,
+        "ratio_range": _round(s.ratio_range, 3),
+        "min_ratio_range": s.min_ratio_range,
+        "provenance": "fitted" if s.horizontal_factor is not None else None,
+        "horizontal_factor": _round(s.horizontal_factor, 3),
+        "vertical_factor": _round(s.vertical_factor, 3),
+        "horizontal_interval_95": interval(s.horizontal_interval),
+        "vertical_interval_95": interval(s.vertical_interval),
+        "residual_spread_log": _round(s.residual_spread, 4),
+        "assumptions": assumptions(s.assumptions),
+        "validation": validation(s.validation),
+    }
+    split_by_track = {r.sample.track_id: r for r in s.samples}
+
+    def activity(r: SampleResult) -> dict[str, Any]:
+        x = r.sample
+        sp = split_by_track[x.track_id]
+        return {
+            "track_id": x.track_id,
+            "name": x.name,
+            "route": x.group,
+            "started_at_utc": _iso(x.started_at_utc),
+            "distance_m": _round(x.distance_m, 1),
+            "ascent_m": _round(x.ascent_m, 1),
+            "descent_m": _round(x.descent_m, 1),
+            "moving_time_s": _round(x.moving_time_s, 0),
+            "effort": str(x.effort) if x.effort else None,
+            "reference_moving_s": _round(r.reference_moving_s, 0),
+            "vertical_horizontal_ratio": _round(
+                sp.reference_vertical_s / sp.reference_horizontal_s, 3
+            ),
+            "implied_speed_multiplier": round(r.implied_multiplier, 3),
+            "loo_error_multiplier": _round(r.error_ratio, 4),
+            "loo_error_split": _round(sp.error_ratio, 4),
+        }
+
+    return {
+        "format_version": REPORT_FORMAT_VERSION,
+        "method": "din33466",
+        "elevation": view.params.elevation,
+        "analysis": {
+            "algorithm_version": ALGORITHM_VERSION,
+            "params_hash": params_hash(view.params),
+        },
+        "reference": {
+            "label": ref.label,
+            "horizontal_speed_m_h": ref.horizontal_speed_m_h,
+            "ascent_rate_m_h": ref.ascent_rate_m_h,
+            "descent_rate_m_h": ref.descent_rate_m_h,
+        },
+        "requirements": {
+            "min_moving_s": bp.min_moving_s,
+            "activity_types": list(bp.activity_types),
+        },
+        "n_activities": f.n_activities,
+        "n_routes": f.n_groups,
+        "models": {"multiplier": multiplier, "split": split},
+        "effort": {
+            "fitted_on": bp.effort,
+            "included": [str(e) if e else "not stated" for e in bp.efforts],
+            "observed_by_effort": [
+                {
+                    "effort": str(g.effort) if g.effort else "not stated",
+                    "n_activities": g.n_activities,
+                    "provenance": "observed",
+                    "mean_implied_multiplier": round(g.mean_implied_multiplier, 3),
+                }
+                for g in view.effort_groups
+            ],
+            "outside_fit": [
+                {
+                    "track_id": p.sample.track_id,
+                    "name": p.sample.name,
+                    "effort": str(p.sample.effort) if p.sample.effort else None,
+                    "pace_vs_multiplier": _round(p.vs_multiplier, 3),
+                    "pace_vs_split": _round(p.vs_split, 3),
+                }
+                for p in view.outside_effort
+            ],
+        },
+        "activities": [activity(r) for r in f.samples],
+        "excluded": [
+            {"track_id": e.track_id, "name": e.name, "reason": e.reason}
+            for e in view.excluded
+        ],
+    }
+
+
+def _personal_report(p: PersonalAssumptions | None) -> dict[str, Any] | None:
+    """What fitted assumptions rest on (ADR-019); null for preset/user ones."""
+    if p is None:
+        return None
+    return {
+        "provenance": "fitted",
+        "model": p.model,
+        "n_activities": p.n_activities,
+        "n_routes": p.n_routes,
+        "effort": p.effort,
+        "loo_median_abs_error": round(p.median_abs_error, 4),
+        "range_multipliers": [round(k, 4) for k in p.range_multipliers],
+        "range_meaning": "95 % range for a single new hike (own variation)",
     }

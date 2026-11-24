@@ -10,7 +10,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from alpha.domain.track import ElevationSource, TrackKind
+from alpha.domain.track import Effort, ElevationSource, TrackKind
 
 
 class Strict(BaseModel):
@@ -132,6 +132,7 @@ class TrackRecord(Strict):
     has_elevation: bool
     has_timestamps: bool
     started_at_utc: str | None = Field(description="ISO 8601, UTC")
+    effort: Effort | None = Field(description="set by the user only (ADR-018)")
     imported_at_utc: str | None
     read_warnings: list[Warning]
 
@@ -195,6 +196,10 @@ class TrackEdit(Strict):
         default=None, description="link this activity to a planned route"
     )
     clear_planned_track: bool = False
+    effort: Effort | None = Field(
+        default=None, description="your own judgement of the activity (ADR-018)"
+    )
+    clear_effort: bool = False
 
 
 class Deletion(Strict):
@@ -301,6 +306,17 @@ class Observed(Strict):
     implied_speed_multiplier: float | None
 
 
+class PersonalInfo(Strict):
+    provenance: Literal["fitted"]
+    model: Literal["multiplier", "split"]
+    n_activities: int
+    n_routes: int
+    effort: str
+    loo_median_abs_error: float
+    range_multipliers: list[float]
+    range_meaning: str
+
+
 class Scenarios(Strict):
     format_version: str
     track: StoredRef
@@ -313,6 +329,9 @@ class Scenarios(Strict):
     observed: list[Observed]
     uncertainty_notes: list[str]
     elevation_series: ElevationSeries
+    personal: PersonalInfo | None = Field(
+        description="what fitted personal speeds rest on (ADR-019)"
+    )
 
 
 # --- DEM elevation (ADR-012) ------------------------------------------------------
@@ -402,3 +421,126 @@ class ElevationCheck(Strict):
     warnings: list[Warning] = Field(description="e.g. ELEVATION_DRIFT")
     terrain_slope: TerrainSlope | None
     terrain_slope_note: str | None
+
+
+# --- personal baseline (Phase 7, ADR-016 to ADR-019) ---------------------------------
+
+
+class BaselineAssumptions(Strict):
+    source: Literal["fitted"]
+    label: str | None
+    horizontal_speed_m_h: float
+    ascent_rate_m_h: float
+    descent_rate_m_h: float
+
+
+class BaselineValidation(Strict):
+    method: Literal["leave one route out"]
+    folds: int
+    median_abs_error: float
+    max_abs_error: float
+
+
+class MultiplierModel(Strict):
+    status: Literal["fitted", "not enough data", "not identifiable"]
+    min_routes: int
+    provenance: Literal["fitted"] | None
+    speed_multiplier: float | None
+    spread_log: float | None
+    average_interval_95: list[float] | None
+    single_activity_interval_95: list[float] | None
+    assumptions: BaselineAssumptions | None
+    validation: BaselineValidation | None
+
+
+class SplitModel(Strict):
+    status: Literal["fitted", "not enough data", "not identifiable"]
+    reason: str | None
+    min_routes: int
+    ratio_range: float | None
+    min_ratio_range: float
+    provenance: Literal["fitted"] | None
+    horizontal_factor: float | None
+    vertical_factor: float | None
+    horizontal_interval_95: list[float] | None
+    vertical_interval_95: list[float] | None
+    residual_spread_log: float | None
+    assumptions: BaselineAssumptions | None
+    validation: BaselineValidation | None
+
+
+class BaselineModels(Strict):
+    multiplier: MultiplierModel
+    split: SplitModel
+
+
+class EffortObserved(Strict):
+    effort: str
+    n_activities: int
+    provenance: Literal["observed"]
+    mean_implied_multiplier: float
+
+
+class EffortOutside(Strict):
+    track_id: int
+    name: str | None
+    effort: str | None
+    pace_vs_multiplier: float | None
+    pace_vs_split: float | None
+
+
+class BaselineEffort(Strict):
+    fitted_on: str
+    included: list[str]
+    observed_by_effort: list[EffortObserved]
+    outside_fit: list[EffortOutside]
+
+
+class BaselineActivity(Strict):
+    track_id: int
+    name: str | None
+    route: int
+    started_at_utc: str | None
+    distance_m: float | None
+    ascent_m: float | None
+    descent_m: float | None
+    moving_time_s: float | None
+    effort: str | None
+    reference_moving_s: float | None
+    vertical_horizontal_ratio: float | None
+    implied_speed_multiplier: float
+    loo_error_multiplier: float | None
+    loo_error_split: float | None
+
+
+class BaselineExcluded(Strict):
+    track_id: int
+    name: str | None
+    reason: str
+
+
+class BaselineReference(Strict):
+    label: str | None
+    horizontal_speed_m_h: float
+    ascent_rate_m_h: float
+    descent_rate_m_h: float
+
+
+class BaselineRequirements(Strict):
+    min_moving_s: float
+    activity_types: list[str]
+
+
+class Baseline(Strict):
+    format_version: str
+    method: Literal["din33466"]
+    elevation: str
+    analysis: AnalysisRef
+    reference: BaselineReference
+    requirements: BaselineRequirements
+    n_activities: int
+    n_routes: int
+    models: BaselineModels
+    effort: BaselineEffort
+    activities: list[BaselineActivity]
+    excluded: list[BaselineExcluded]

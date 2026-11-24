@@ -8,13 +8,14 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import TextIO
 
+from alpha.application.baseline import BaselineNotFittedError, personal_baseline
 from alpha.application.elevation import (
     enrich_all,
     enrich_track,
     get_tiles,
     plan_tiles,
 )
-from alpha.application.scenarios import estimate_duration
+from alpha.application.scenarios import estimate_duration, estimate_personal
 from alpha.application.tracks import (
     DemProfileMissingError,
     InvalidEditError,
@@ -45,10 +46,12 @@ from alpha.domain.scenarios import (
     ScenarioInputError,
     din_assumptions,
 )
-from alpha.domain.track import ElevationSource, TrackKind
+from alpha.domain.track import Effort, ElevationSource, TrackKind
 from alpha.gpx.reader import GpxDocument, GpxReadError, read_gpx
+from alpha.modelling import EFFORT_SELECTIONS, BaselineParams
 from alpha.persistence import SchemaMismatchError
 from alpha.report import (
+    baseline_report,
     comparison_report,
     elevation_check_report,
     file_report,
@@ -131,7 +134,11 @@ def _parser() -> argparse.ArgumentParser:
     sub.add_argument("track_b", type=int)
     _add_analysis_options(sub)
 
-    sub = command("edit", "correct kind or elevation source, or link to a plan", _edit)
+    sub = command(
+        "edit",
+        "correct kind or elevation source, link to a plan, or note the effort",
+        _edit,
+    )
     sub.add_argument("track_id", type=int)
     sub.add_argument("--kind", choices=[k.value for k in TrackKind])
     sub.add_argument("--elevation-source", choices=[e.value for e in ElevationSource])
@@ -140,6 +147,11 @@ def _parser() -> argparse.ArgumentParser:
         "--planned-track", type=int, metavar="ID", help="link to the planned route ID"
     )
     link.add_argument("--no-planned-track", action="store_true", help="remove the link")
+    sub.add_argument(
+        "--effort",
+        choices=[*(e.value for e in Effort), "none"],
+        help="how hard the activity was, in your judgement (none clears it)",
+    )
 
     sub = command(
         "scenarios",
@@ -167,8 +179,47 @@ def _parser() -> argparse.ArgumentParser:
     sub.add_argument("--delay-min", type=float, default=0.0, help="default 0")
     sub.add_argument(
         "--speed-multipliers",
-        default=",".join(f"{k:g}" for k in DEFAULT_SPEED_MULTIPLIERS),
-        help="comma-separated, applied to all speeds (default %(default)s)",
+        help="comma-separated, applied to all speeds (default "
+        + ",".join(f"{k:g}" for k in DEFAULT_SPEED_MULTIPLIERS)
+        + "; with --personal: your own 95 % range)",
+    )
+    sub.add_argument(
+        "--personal",
+        action="store_true",
+        help="use speeds fitted from your activities (see 'alpha baseline'); "
+        "fails if none is fitted yet",
+    )
+    sub.add_argument(
+        "--effort",
+        choices=sorted(EFFORT_SELECTIONS),
+        default=BaselineParams().effort,
+        help="with --personal: which efforts the speeds are fitted on "
+        "(default %(default)s)",
+    )
+    _add_analysis_options(sub)
+
+    sub = command(
+        "baseline",
+        "personal speed multiplier on DIN 33466 from your activities (fitted)",
+        _baseline,
+    )
+    sub.add_argument(
+        "--min-routes",
+        type=int,
+        default=BaselineParams().min_groups,
+        help="distinct routes needed before fitting model 1 (default %(default)s)",
+    )
+    sub.add_argument(
+        "--min-routes-split",
+        type=int,
+        default=BaselineParams().split_min_groups,
+        help="distinct routes needed before fitting model 2 (default %(default)s)",
+    )
+    sub.add_argument(
+        "--effort",
+        choices=sorted(EFFORT_SELECTIONS),
+        default=BaselineParams().effort,
+        help="which efforts to fit (default %(default)s: normal and not stated)",
     )
     _add_analysis_options(sub)
 
@@ -449,6 +500,7 @@ def _edit(args: argparse.Namespace, out: TextIO) -> int:
         or args.elevation_source
         or args.planned_track
         or args.no_planned_track
+        or args.effort
     ):
         print("error: nothing to change; see alpha edit --help", file=out)
         return EXIT_BAD_PARAMS
@@ -465,6 +517,8 @@ def _edit(args: argparse.Namespace, out: TextIO) -> int:
             ),
             planned_track_id=args.planned_track,
             clear_planned_track=args.no_planned_track,
+            effort=Effort(args.effort) if args.effort not in (None, "none") else None,
+            clear_effort=args.effort == "none",
         )
         link = (
             f", follows plan #{record.planned_track_id}"
@@ -506,27 +560,65 @@ def _multipliers(text: str) -> tuple[float, ...]:
 
 
 def _scenarios(args: argparse.Namespace, out: TextIO) -> int:
+    speeds_given = any(
+        v is not None
+        for v in (
+            args.horizontal_speed_km_h,
+            args.ascent_rate_m_h,
+            args.descent_rate_m_h,
+        )
+    )
+    if args.personal and speeds_given:
+        print("error: --personal uses fitted speeds; omit the speed options", file=out)
+        return EXIT_BAD_PARAMS
     try:
         params = _params(args)
         assumptions = _assumptions(args)
-        multipliers = _multipliers(args.speed_multipliers)
+        multipliers = (
+            _multipliers(args.speed_multipliers)
+            if args.speed_multipliers is not None
+            else None
+        )
+        baseline_params = BaselineParams(effort=args.effort)
     except ValueError as exc:
         print(f"error: {exc}", file=out)
         return EXIT_BAD_PARAMS
 
     def action(ws: Workspace) -> int:
         try:
-            view = estimate_duration(
-                ws, args.track_id, assumptions, multipliers, params
-            )
+            if args.personal:
+                view = estimate_personal(
+                    ws,
+                    args.track_id,
+                    params,
+                    baseline_params,
+                    break_s=assumptions.break_s,
+                    delay_s=assumptions.delay_s,
+                    speed_multipliers=multipliers,
+                )
+            else:
+                view = estimate_duration(
+                    ws,
+                    args.track_id,
+                    assumptions,
+                    multipliers or DEFAULT_SPEED_MULTIPLIERS,
+                    params,
+                )
         except ScenarioInputError as exc:
             print(f"error: track {args.track_id}: {exc}", file=out)
+            return EXIT_INVALID
+        except BaselineNotFittedError as exc:
+            print(f"error: {exc}", file=out)
             return EXIT_INVALID
         if args.json:
             r = view.record
             ref = stored_track_ref(r.id, r.source_filename, r.planned_track_id)
             out.write(
-                to_json(scenario_report(ref, view.result, view.observed, view.dem))
+                to_json(
+                    scenario_report(
+                        ref, view.result, view.observed, view.dem, view.personal
+                    )
+                )
             )
             return EXIT_OK
         render.scenarios(view, out)
@@ -565,6 +657,29 @@ def _enrich(args: argparse.Namespace, out: TextIO) -> int:
             out.write(to_json(elevation_check_report(ref, view)))
             return EXIT_OK
         render.elevation(view, out)
+        return EXIT_OK
+
+    return _with_workspace(args, out, action)
+
+
+def _baseline(args: argparse.Namespace, out: TextIO) -> int:
+    try:
+        params = _params(args)
+        baseline_params = BaselineParams(
+            min_groups=args.min_routes,
+            split_min_groups=args.min_routes_split,
+            effort=args.effort,
+        )
+    except ValueError as exc:
+        print(f"error: {exc}", file=out)
+        return EXIT_BAD_PARAMS
+
+    def action(ws: Workspace) -> int:
+        view = personal_baseline(ws, params, baseline_params)
+        if args.json:
+            out.write(to_json(baseline_report(view)))
+        else:
+            render.baseline(view, out)
         return EXIT_OK
 
     return _with_workspace(args, out, action)

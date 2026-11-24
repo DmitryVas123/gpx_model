@@ -112,3 +112,12 @@ class Track:
     @property
     def has_timestamps(self) -> bool:
         return self.point_count > 0 and self.time_coverage == 1.0
+
+
+class Effort(StrEnum):
+    """How hard the user says an activity was. Only ever set by the user; ALPHA
+    never infers it (ADR-018)."""
+
+    EASY = "easy"
+    NORMAL = "normal"
+    HARD = "hard"

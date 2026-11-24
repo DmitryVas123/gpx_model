@@ -4,6 +4,7 @@ import hashlib
 from collections.abc import Sequence
 from typing import TextIO
 
+from alpha.application.baseline import BaselineView
 from alpha.application.elevation import ElevationView, EnrichBatch, TilePlan
 from alpha.application.scenarios import ScenarioView
 from alpha.application.tracks import TrackComparison, TrackListItem
@@ -13,9 +14,10 @@ from alpha.domain.climbs import ClimbSection
 from alpha.domain.comparison import MetricDelta
 from alpha.domain.profile import GRADIENT_BANDS, UNKNOWN_BAND
 from alpha.domain.quality import QualityWarning, check_track
-from alpha.domain.scenarios import SCENARIO_METHODS
+from alpha.domain.scenarios import SCENARIO_METHODS, DinAssumptions
 from alpha.domain.track import Inference, Track
 from alpha.gpx.reader import GpxDocument, SourceTrack
+from alpha.modelling import Validation
 from alpha.persistence import DemProfileRecord, TrackRecord
 
 UNKNOWN = "unknown"
@@ -246,9 +248,10 @@ def warnings(items: Sequence[QualityWarning], out: TextIO, indent: str) -> None:
 
 
 def record_line(r: TrackRecord) -> str:
+    effort = f"  [{r.effort} effort]" if r.effort else ""
     return (
         f"#{r.id} {r.kind}{_guess(r.kind_inferred_by)}  "
-        f'"{r.name or "(unnamed)"}"  from {r.source_filename}'
+        f'"{r.name or "(unnamed)"}"  from {r.source_filename}{effort}'
     )
 
 
@@ -376,11 +379,19 @@ def scenarios(v: ScenarioView, out: TextIO) -> None:
     print(file=out)
     print(f"  Assumptions ({source})", file=out)
     print(
-        f"    horizontal {a.horizontal_speed_m_h / 1000:g} km/h, "
-        f"ascent {a.ascent_rate_m_h:g} m/h, descent {a.descent_rate_m_h:g} m/h, "
+        f"    horizontal {a.horizontal_speed_m_h / 1000:.3g} km/h, "
+        f"ascent {a.ascent_rate_m_h:.0f} m/h, descent {a.descent_rate_m_h:.0f} m/h, "
         f"breaks {hm(a.break_s)}, delay {hm(a.delay_s)}",
         file=out,
     )
+    if v.personal is not None:
+        q = v.personal
+        print(
+            f"    fitted with model '{q.model}' on {q.n_activities} activities, "
+            f"{q.n_routes} routes (effort '{q.effort}'); leave-one-route-out "
+            f"error median {q.median_abs_error:.0%}",
+            file=out,
+        )
     print("  Inputs (calculated from the track)", file=out)
     print(
         f"    distance {km(r.inputs.distance_m)}, ascent {m(r.inputs.ascent_m)}, "
@@ -397,7 +408,7 @@ def scenarios(v: ScenarioView, out: TextIO) -> None:
     for s in r.scenarios:
         b = s.breakdown
         print(
-            f"  {s.label:<10}{'x' + format(s.speed_multiplier, 'g'):>7}"
+            f"  {s.label:<10}{'x' + format(s.speed_multiplier, '.3g'):>7}"
             f"{hm(b.horizontal_s):>12}{hm(b.vertical_s):>10}{hm(b.moving_s):>10}"
             f"{hm(b.break_s + b.delay_s):>14}{hm(s.estimated_duration_s):>10}",
             file=out,
@@ -643,5 +654,171 @@ def _terrain_slope(v: ElevationView, out: TextIO) -> None:
         print(
             f"    median {s.median_deg:.0f} deg, 90 % below {s.p90_deg:.0f} deg, "
             f"steepest {s.max_deg:.0f} deg at km {s.max_at_m / 1000:.2f}",
+            file=out,
+        )
+
+
+# --- personal baseline (Phase 7) -----------------------------------------------------
+
+
+def _pct(value: float | None) -> str:
+    return "-" if value is None else f"{value * 100:+.0f} %"
+
+
+def baseline(v: BaselineView, out: TextIO) -> None:
+    f, s = v.fit, v.split
+    ref = f.reference
+    print(
+        f"Personal speeds on DIN 33466 (reference: {ref.label}, "
+        f"{ref.horizontal_speed_m_h / 1000:g} km/h, {ref.ascent_rate_m_h:g} m/h up, "
+        f"{ref.descent_rate_m_h:g} m/h down)",
+        file=out,
+    )
+    print(f"Elevation: {v.params.elevation}", file=out)
+    print(file=out)
+    split_by_track = {r.sample.track_id: r for r in s.samples}
+    if f.samples:
+        print(
+            f"  {'ID':>4}  {'DATE':<11}{'DIST':>9}{'ASCENT':>8}{'MOVING':>9}"
+            f"{'DIN STD':>9}{'V/H':>6}{'x OBS.':>8}{'LOO 1':>8}{'LOO 2':>8}  NAME",
+            file=out,
+        )
+    for r in f.samples:
+        x = r.sample
+        sp = split_by_track[x.track_id]
+        date = x.started_at_utc.strftime("%Y-%m-%d") if x.started_at_utc else "-"
+        print(
+            f"  {x.track_id:>4}  {date:<11}{km(x.distance_m):>9}{m(x.ascent_m):>8}"
+            f"{hm(x.moving_time_s):>9}{hm(r.reference_moving_s):>9}"
+            f"{sp.reference_vertical_s / sp.reference_horizontal_s:>6.2f}"
+            f"{r.implied_multiplier:>8.2f}{_pct(r.error_ratio):>8}"
+            f"{_pct(sp.error_ratio):>8}  {x.name or '(unnamed)'}",
+            file=out,
+        )
+    for e in v.excluded:
+        print(f"  #{e.track_id} not used: {e.reason}", file=out)
+    print(file=out)
+    print(
+        "  V/H = vertical / horizontal time at the reference speeds; x OBS. = DIN "
+        "standard moving time / your moving time (observed).",
+        file=out,
+    )
+    print(
+        "  LOO 1 / LOO 2 = error of the predicted moving time with that route left "
+        "out: model 1 (one multiplier) / model 2 (flat and vertical).",
+        file=out,
+    )
+
+    print(file=out)
+    print("Model 1: one speed multiplier", file=out)
+    if f.multiplier is None:
+        print(
+            f"  Not enough data: {f.n_groups} of {f.min_groups} distinct routes "
+            f"({f.n_activities} activities). Nothing is fitted yet.",
+            file=out,
+        )
+    else:
+        assert f.average_interval and f.single_interval and f.validation
+        assert f.assumptions
+        lo, hi = f.average_interval
+        slo, shi = f.single_interval
+        print(
+            f"  Fitted ({f.n_activities} activities, {f.n_groups} routes): "
+            f"x{f.multiplier:.2f}; average x{lo:.2f}..x{hi:.2f}, one new hike "
+            f"x{slo:.2f}..x{shi:.2f} (95 %)",
+            file=out,
+        )
+        print(f"  = {_speeds(f.assumptions)} (source: fitted)", file=out)
+        print(f"  {_validation(f.validation)}", file=out)
+
+    print(file=out)
+    print("Model 2: flat and vertical factors", file=out)
+    if s.horizontal_factor is None:
+        print(
+            f"  {str(s.status).capitalize()}: {s.reason}. Nothing is fitted yet.",
+            file=out,
+        )
+    else:
+        assert s.horizontal_interval and s.vertical_interval and s.validation
+        assert s.vertical_factor is not None and s.assumptions
+        hlo, hhi = s.horizontal_interval
+        vlo, vhi = s.vertical_interval
+        print(
+            f"  Fitted ({s.n_activities} activities, {s.n_groups} routes): "
+            f"flat x{s.horizontal_factor:.2f} ({hlo:.2f}..{hhi:.2f}), "
+            f"vertical x{s.vertical_factor:.2f} ({vlo:.2f}..{vhi:.2f}) (95 %)",
+            file=out,
+        )
+        print(f"  = {_speeds(s.assumptions)} (source: fitted)", file=out)
+        print(f"  {_validation(s.validation)}", file=out)
+    if s.ratio_range is not None:
+        print(
+            f"  Route mix: V/H varies by x{s.ratio_range:.2f} across routes "
+            f"(needs x{s.min_ratio_range:g} to separate flat from vertical).",
+            file=out,
+        )
+    _effort(v, out)
+    if f.validation and s.validation:
+        better = (
+            "model 2"
+            if s.validation.median_abs_error < f.validation.median_abs_error
+            else "model 1"
+        )
+        print(file=out)
+        print(
+            f"Comparison on the same activities: median error model 1 "
+            f"{f.validation.median_abs_error:.0%}, model 2 "
+            f"{s.validation.median_abs_error:.0%}; {better} predicts better.",
+            file=out,
+        )
+
+
+def _speeds(a: DinAssumptions) -> str:
+    return (
+        f"{a.horizontal_speed_m_h / 1000:.1f} km/h, {a.ascent_rate_m_h:.0f} m/h up, "
+        f"{a.descent_rate_m_h:.0f} m/h down"
+    )
+
+
+def _validation(v: Validation) -> str:
+    return (
+        f"Leave-one-route-out error of the moving time: median "
+        f"{v.median_abs_error:.0%}, max {v.max_abs_error:.0%} ({v.folds} folds)"
+    )
+
+
+def _effort(v: BaselineView, out: TextIO) -> None:
+    if not v.effort_groups:
+        return
+    print(file=out)
+    print(
+        f"Effort (your annotation; models fitted on '{v.baseline_params.effort}')",
+        file=out,
+    )
+    for g in v.effort_groups:
+        print(
+            f"  {g.effort or 'not stated'!s:<12}{g.n_activities:>3} activities, "
+            f"observed x{g.mean_implied_multiplier:.2f} vs DIN standard",
+            file=out,
+        )
+    print(
+        "  Observed averages only: the efforts may also differ in terrain.",
+        file=out,
+    )
+    for p in v.outside_effort:
+        x = p.sample
+        parts = []
+        if p.vs_multiplier is not None:
+            parts.append(f"model 1 {_pct(p.vs_multiplier - 1)}")
+        if p.vs_split is not None:
+            parts.append(f"model 2 {_pct(p.vs_split - 1)}")
+        compared = (
+            "faster(+)/slower(-) than predicted: " + ", ".join(parts)
+            if parts
+            else "no fitted model to compare with yet"
+        )
+        print(
+            f"  #{x.track_id} {x.name or '(unnamed)'} [{x.effort or 'not stated'}]: "
+            f"{compared}",
             file=out,
         )

@@ -163,6 +163,7 @@ def run_scenarios(
     assumptions: DinAssumptions,
     speed_multipliers: tuple[float, ...] = DEFAULT_SPEED_MULTIPLIERS,
     method: str = "din33466",
+    extra_notes: tuple[str, ...] = (),
 ) -> ScenarioResult:
     """Apply a registered method to an analysis, once per speed multiplier.
 
@@ -192,7 +193,8 @@ def run_scenarios(
         params_hash=analysis.params_hash,
         inputs=inputs,
         scenarios=scenarios,
-        uncertainty_notes=_notes(analysis, assumptions, speed_multipliers),
+        uncertainty_notes=_notes(analysis, assumptions, speed_multipliers)
+        + extra_notes,
     )
 
 
@@ -222,10 +224,16 @@ def _notes(
             f"'{a.label}' are published reference values for an average hiker on "
             "marked trails, not personal values."
         )
-    if len(multipliers) > 1:
+    if a.source is AssumptionSource.FITTED:
         notes.append(
-            f"The range ({min(multipliers):g}x to {max(multipliers):g}x speed) shows "
-            "sensitivity to pace only, not to delays or conditions."
+            f"'{a.label}' are fitted from your own recorded activities; they "
+            "describe how you walked then, under those conditions and efforts."
+        )
+    # Fitted assumptions explain their own range (the caller adds the note).
+    if len(multipliers) > 1 and a.source is not AssumptionSource.FITTED:
+        notes.append(
+            f"The range ({min(multipliers):.3g}x to {max(multipliers):.3g}x speed) "
+            "shows sensitivity to pace only, not to delays or conditions."
         )
     steep_m = sum(
         metres

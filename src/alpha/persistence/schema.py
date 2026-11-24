@@ -18,11 +18,12 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 # Bump when tables change. Purely additive changes (new tables only) are
 # migrated automatically; anything else is rejected with an explanation
 # (ADR-002). 2: dem_profiles (ADR-012).
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 # Upgrades that only add tables: version -> tables new in version + 1.
 ADDITIVE_UPGRADES: dict[int, tuple[str, ...]] = {
     1: ("dem_profiles",),
     2: ("terrain_slopes",),
+    3: ("track_annotations",),
 }
 
 
@@ -202,3 +203,16 @@ class TerrainSlopeRow(Base):
     created_at_utc: Mapped[datetime] = mapped_column(DateTime)
     point_count: Mapped[int] = mapped_column(Integer)
     slope_blob: Mapped[bytes] = mapped_column(LargeBinary)
+
+
+class TrackAnnotationRow(Base):
+    """User annotations of a track that the GPX does not contain (ADR-018).
+    Kept apart from ``tracks`` so imported data stays as read."""
+
+    __tablename__ = "track_annotations"
+
+    track_id: Mapped[int] = mapped_column(
+        ForeignKey("tracks.id", ondelete="CASCADE"), primary_key=True
+    )
+    effort: Mapped[str | None] = mapped_column(String, nullable=True)
+    updated_at_utc: Mapped[datetime] = mapped_column(DateTime)

@@ -13,7 +13,7 @@ import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import Depends, FastAPI, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
@@ -22,8 +22,9 @@ from starlette.concurrency import run_in_threadpool
 
 from alpha import __version__
 from alpha.api import schemas
+from alpha.application.baseline import BaselineNotFittedError, personal_baseline
 from alpha.application.elevation import elevation_check, enrich_track
-from alpha.application.scenarios import estimate_duration
+from alpha.application.scenarios import estimate_duration, estimate_personal
 from alpha.application.tracks import (
     DemProfileMissingError,
     InvalidEditError,
@@ -51,7 +52,9 @@ from alpha.domain.scenarios import (
     din_assumptions,
 )
 from alpha.gpx.reader import DEFAULT_MAX_BYTES, GpxReadError, ReadErrorCode
+from alpha.modelling import BaselineParams
 from alpha.report import (
+    baseline_report,
     comparison_report,
     elevation_check_report,
     list_item_report,
@@ -69,7 +72,8 @@ ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
     404: {"model": schemas.ErrorResponse, "description": "TRACK_NOT_FOUND"},
     409: {
         "model": schemas.ErrorResponse,
-        "description": "INVALID_EDIT, or DEM_PROFILE_MISSING (run enrichment first)",
+        "description": "INVALID_EDIT, DEM_PROFILE_MISSING (run enrichment first), "
+        "or BASELINE_NOT_FITTED (not enough activities for personal speeds)",
     },
     413: {"model": schemas.ErrorResponse, "description": "FILE_TOO_LARGE"},
     502: {
@@ -173,6 +177,10 @@ def _install_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(DemDownloadError)
     async def dem_download(_: Request, exc: DemDownloadError) -> JSONResponse:
         return _error(502, "DEM_DOWNLOAD_FAILED", str(exc))  # key already redacted
+
+    @app.exception_handler(BaselineNotFittedError)
+    async def no_baseline(_: Request, exc: BaselineNotFittedError) -> JSONResponse:
+        return _error(409, "BASELINE_NOT_FITTED", str(exc))
 
     @app.exception_handler(ScenarioInputError)
     async def scenario_input(_: Request, exc: ScenarioInputError) -> JSONResponse:
@@ -326,7 +334,7 @@ def _install_routes(app: FastAPI) -> None:
         tags=["tracks"],
         response_model=schemas.TrackRecord,
         responses=ERROR_RESPONSES,
-        summary="Correct kind or elevation source, or link to a planned route",
+        summary="Correct kind or elevation source, link to a plan, or set effort",
     )
     def edit(
         track_id: int, body: schemas.TrackEdit, ws: WorkspaceDep
@@ -338,6 +346,8 @@ def _install_routes(app: FastAPI) -> None:
             elevation_source=body.elevation_source,
             planned_track_id=body.planned_track_id,
             clear_planned_track=body.clear_planned_track,
+            effort=body.effort,
+            clear_effort=body.clear_effort,
         )
         return record_report(record)
 
@@ -396,9 +406,60 @@ def _install_routes(app: FastAPI) -> None:
         delay_min: float = 0.0,
         speed_multiplier: Annotated[
             list[float] | None,
-            Query(description="repeat for a range; default 1.2, 1, 0.8"),
+            Query(
+                description="repeat for a range; default 1.2, 1, 0.8 (personal: "
+                "your own 95 % range)"
+            ),
         ] = None,
+        assumptions_source: Annotated[
+            Literal["standard", "personal"],
+            Query(
+                alias="assumptions",
+                description="standard: DIN 33466 or the speeds given; personal: "
+                "fitted from your activities (409 if not fitted yet)",
+            ),
+        ] = "standard",
+        effort: Annotated[
+            str, Query(description="personal only: normal, hard, easy, or all")
+        ] = BaselineParams().effort,
     ) -> dict[str, Any]:
+        if assumptions_source == "personal":
+            if any(
+                v is not None
+                for v in (horizontal_speed_km_h, ascent_rate_m_h, descent_rate_m_h)
+            ):
+                raise ApiError(
+                    422,
+                    "INVALID_PARAMS",
+                    "personal assumptions use fitted speeds; omit the speeds",
+                )
+            if speed_multiplier and any(k <= 0 for k in speed_multiplier):
+                raise ApiError(
+                    422, "INVALID_PARAMS", "speed_multiplier values must be > 0"
+                )
+            if break_min < 0 or delay_min < 0:
+                raise ApiError(422, "INVALID_PARAMS", "breaks and delay must be >= 0")
+            try:
+                baseline_params = BaselineParams(effort=effort)
+            except ValueError as exc:
+                raise ApiError(422, "INVALID_PARAMS", str(exc)) from exc
+            pview = estimate_personal(
+                ws,
+                track_id,
+                params,
+                baseline_params,
+                break_s=break_min * 60,
+                delay_s=delay_min * 60,
+                speed_multipliers=tuple(speed_multiplier) if speed_multiplier else None,
+            )
+            r = pview.record
+            return scenario_report(
+                stored_track_ref(r.id, r.source_filename, r.planned_track_id),
+                pview.result,
+                pview.observed,
+                pview.dem,
+                pview.personal,
+            )
         multipliers = tuple(speed_multiplier or DEFAULT_SPEED_MULTIPLIERS)
         try:
             assumptions = din_assumptions(
@@ -494,3 +555,25 @@ def _install_routes(app: FastAPI) -> None:
         return elevation_check_report(
             stored_track_ref(r.id, r.source_filename, r.planned_track_id), view
         )
+
+    # --- personal baseline (Phase 7) -----------------------------------------------
+
+    @app.get(
+        "/baseline",
+        tags=["analysis"],
+        response_model=schemas.Baseline,
+        responses=ERROR_RESPONSES,
+        summary="Personal speeds fitted from your activities (two models)",
+    )
+    def baseline(
+        ws: WorkspaceDep,
+        params: ParamsDep,
+        effort: Annotated[
+            str, Query(description="normal (default), hard, easy, or all")
+        ] = BaselineParams().effort,
+    ) -> dict[str, Any]:
+        try:
+            baseline_params = BaselineParams(effort=effort)
+        except ValueError as exc:
+            raise ApiError(422, "INVALID_PARAMS", str(exc)) from exc
+        return baseline_report(personal_baseline(ws, params, baseline_params))

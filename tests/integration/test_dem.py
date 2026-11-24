@@ -27,6 +27,7 @@ from alpha.cli.config import opentopography_api_key, read_env_file
 from alpha.dem import DemDownloadError, DemProvider, DemUnavailableError, opentopography
 from alpha.domain.analysis import AnalysisParams
 from alpha.persistence import Database
+from alpha.persistence.schema import SCHEMA_VERSION
 from tests.helpers import (
     LAT0,
     LON0,
@@ -174,7 +175,7 @@ def test_version_1_database_is_upgraded_in_place(tmp_path: Path) -> None:
     version = connection.execute("select value from meta").fetchone()[0]
     tables = {r[0] for r in connection.execute("select name from sqlite_master")}
     connection.close()
-    assert version == "3"
+    assert version == str(SCHEMA_VERSION)
     assert "dem_profiles" in tables
 
 
@@ -559,7 +560,7 @@ def test_version_2_database_gains_the_slope_table(tmp_path: Path) -> None:
     version = connection.execute("select value from meta").fetchone()[0]
     tables = {r[0] for r in connection.execute("select name from sqlite_master")}
     connection.close()
-    assert version == "3" and "terrain_slopes" in tables
+    assert version == str(SCHEMA_VERSION) and "terrain_slopes" in tables
 
 
 def test_api_reports_terrain_slope(

@@ -85,7 +85,12 @@ gpx_model/
 │   ├── application/
 │   │   ├── tracks.py         # Workspace; import/list/show/compare/edit/delete
 │   │   ├── scenarios.py      # estimate_duration + observed times
-│   │   └── elevation.py      # enrich_track, elevation_check (DEM)
+│   │   ├── elevation.py      # enrich_track, elevation_check (DEM)
+│   │   └── baseline.py       # personal_baseline: samples -> modelling
+│   ├── modelling/            # Phase 7: pure fitting on samples; imports only
+│   │   │                     # numpy + domain (ADR-005)
+│   │   ├── baseline.py       # model 1: one speed multiplier (ADR-016)
+│   │   └── split.py          # model 2: flat and vertical factors (ADR-017)
 │   ├── dem/                  # DEM adapter: datasets, 0.25° tiles, cache,
 │   │                         # OpenTopography client, local GeoTIFF tiles
 │   │                         # (local.py), metalink downloads (metalink.py),
@@ -115,11 +120,8 @@ gpx_model/
 
 ### Planned
 
-``` text
-src/alpha/
-└── modelling/                # Phase 7: fit assumptions from history; ML lives here,
-                              # never in domain (ADR-005)
-```
+Further Phase 7 models (three DIN speeds, pace per gradient band) are
+added to `alpha.modelling` (ADR-016).
 
 ## 4. Key design decisions
 
@@ -158,7 +160,9 @@ are inputs that record their source: `user`, `preset`, or `fitted`. A
 personal model therefore usually supplies assumptions to an existing
 method rather than replacing it. Fitting and any ML live in a separate
 `alpha.modelling` package (Phase 7) that depends on the domain, never the
-other way round (ADR-005). No class hierarchy is needed.
+other way round (ADR-005). It is pure: `alpha.application.baseline`
+collects samples from storage and passes them in (ADR-016). No class
+hierarchy is needed.
 
 ### 4.6 Reading GPX
 
@@ -263,7 +267,8 @@ Implemented in `alpha.application.tracks` (ADR-002).
 | `PATCH /tracks/{id}` | `{kind, elevation_source, planned_track_id, clear_planned_track}` |
 | `DELETE /tracks/{id}/source-file[?dry_run=true]` | Delete the source file and its tracks |
 | `GET /comparisons?a=&b=` | Compare b against a |
-| `GET /tracks/{id}/scenarios` | DIN 33466 range + observed times |
+| `GET /tracks/{id}/scenarios` | DIN 33466 range + observed times; `assumptions=personal` for fitted speeds |
+| `GET /baseline` | Personal speed models (ADR-016 to ADR-019) |
 | `GET /dem/datasets` | DEM datasets, `downloads_available` |
 | `POST /tracks/{id}/dem` | Enrich with DEM elevation (downloads missing tiles only) |
 | `GET /tracks/{id}/dem/{dataset}` | Elevation check from the stored profile (no network) |

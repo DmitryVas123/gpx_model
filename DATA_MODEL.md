@@ -381,7 +381,7 @@ not.
 
 ### 6.1 Report format (`alpha.report`, `alpha analyse --json`)
 
-JSON with `format_version: "6"`:
+JSON with `format_version: "10"`:
 
 -   2 added `distance_raw_m` and renamed `distance_in_stops_m` to
     `distance_while_stopped_m`.
@@ -406,6 +406,13 @@ JSON with `format_version: "6"`:
 -   6 added `terrain_slope` (calculated; bands, unknown, median, p90, max
     and its position, baseline) and `terrain_slope_note` (why it is
     missing) to the elevation check report (ADR-015).
+-   7 added the personal baseline report (§7.3, ADR-016).
+-   8 restructured it: `models.multiplier` and `models.split` (§7.4,
+    ADR-017).
+-   9 added `effort` to track records and to the baseline activities,
+    and an `effort` section to the baseline report (§7.5, ADR-018).
+-   10 added `personal` to scenario reports (§7.6, ADR-019): null for
+    preset or user assumptions.
 
 The report itself contains:
 
@@ -584,6 +591,119 @@ Invariant tests: lowering any speed never shortens a scenario; breaks
 and delay add exactly their duration; moving time scales with
 1 / multiplier.
 
+### 7.3 Personal speed baseline (ADR-016)
+
+``` python
+@dataclass(frozen=True)
+class ActivitySample:          # one eligible activity, one elevation series
+    track_id: int
+    group: int                 # route group: linked plan's ID, else own ID
+    name: str | None
+    started_at_utc: datetime | None
+    distance_m: float          # jitter-filtered 2D distance (§5.2)
+    ascent_m: float
+    descent_m: float
+    moving_time_s: float       # > 0
+
+@dataclass(frozen=True)
+class BaselineParams:
+    min_groups: int = 5                     # distinct routes before fitting
+    min_moving_s: float = 1800.0
+    activity_types: tuple[str, ...] = ("hiking", "walking")
+    reference: DinAssumptions = DIN_33466_STANDARD
+```
+
+-   Per activity (observed ratio):
+    `k_i = DIN moving time(reference) / moving_time_s`.
+-   Fit (`MultiplierFit`):
+    -   `multiplier = exp(mean over groups of mean ln k_i)`;
+    -   `spread` = sample standard deviation of the group means of
+        `ln k_i`;
+    -   `average_interval` = `exp(mean ± t975(n−1)·spread/√n)`;
+    -   `single_interval` = `exp(mean ± t975(n−1)·spread·√(1+1/n))`;
+        `n` = number of groups.
+-   `validation`: leave one route group out. `error_ratio` =
+    `predicted / observed − 1` per activity; reported as the median and
+    maximum of the absolute value.
+-   `assumptions`: the reference speeds × `multiplier`, source `fitted`.
+-   Status `not enough data` when `n < min_groups`. Then only the
+    per-activity ratios are reported.
+-   Exclusions carry a reason: activity type, no timestamps, moving time
+    < `min_moving_s`, ascent unknown, or the requested DEM series not
+    stored.
+-   JSON: `alpha.report.baseline_report` (`alpha baseline --json`,
+    report format 8, `models.multiplier`).
+
+### 7.4 Flat and vertical factors (ADR-017)
+
+-   Per activity, at the reference speeds:
+    -   `h_i = distance_m / H · 3600`;
+    -   `v_i = (ascent_m / U + descent_m / D) · 3600`.
+-   Model: `moving = max(h/kh, v/kv) + min(h/kh, v/kv) / 2`. The ascent
+    and descent rates share `kv`, keeping DIN's U : D ratio.
+-   Fit (`SplitFit`):
+    -   minimises `Σ w_i · ln(pred_i / obs_i)²`, with `w_i = 1 / (size of
+        its route group)`;
+    -   grid over `ln k` from ln 0.2 to ln 8, step 0.02, then 0.001;
+    -   an optimum on the edge gives `not identifiable`.
+-   Gates (`BaselineParams`):
+    -   `split_min_groups` [8] distinct routes;
+    -   `ratio_range` = max/min over groups of the geometric-mean
+        `v_i / h_i` must be ≥ `split_min_ratio_range` [1.5], otherwise
+        `not identifiable`.
+-   Reported:
+    -   `horizontal_factor`, `vertical_factor`;
+    -   95 % jackknife intervals over route groups;
+    -   `residual_spread` (std of group mean log errors, `ddof=2`);
+    -   leave-one-route-out `validation`;
+    -   `assumptions`: `H·kh`, `U·kv`, `D·kv`, source `fitted`.
+-   JSON: `models.split`, with `reason` when nothing is fitted. Each
+    activity carries `vertical_horizontal_ratio`, `loo_error_multiplier`,
+    and `loo_error_split`.
+
+### 7.5 Effort (ADR-018)
+
+-   `Effort` = `easy` | `normal` | `hard`, a user annotation per activity
+    (`TrackRecord.effort`, `ActivitySample.effort`); null = not stated.
+-   `BaselineParams.effort` selects what both models are fitted on:
+    -   `normal` (default): normal and not stated;
+    -   `hard`;
+    -   `easy`;
+    -   `all`.
+-   Activities outside the selection are excluded with the reason
+    `effort … (fitting '…' efforts)`, and reported:
+    -   `effort_groups`: per label, `n_activities` and the **observed**
+        geometric mean of `k_i`;
+    -   `pace_vs_models`: per activity, DIN moving time with the fitted
+        assumptions / observed moving time, for model 1 and model 2
+        (null when a model is not fitted; > 1 = faster than predicted).
+-   JSON `effort`: `fitted_on`, `included`, `observed_by_effort`,
+    `outside_fit`.
+
+### 7.6 Personal assumptions in scenarios (ADR-019)
+
+-   `personal_assumptions(BaselineView) -> PersonalAssumptions`:
+    -   picks the fitted model with the smallest leave-one-route-out
+        median error (model 1 on a tie);
+    -   raises `BaselineNotFittedError` when none is fitted.
+-   `PersonalAssumptions`:
+    -   `assumptions` (source `fitted`);
+    -   `model` (`multiplier` | `split`);
+    -   `n_activities`, `n_routes`, `effort`, `median_abs_error`;
+    -   `range_multipliers` = (faster, 1, slower), from the single-hike
+        95 % range:
+        -   model 1: `single_interval / k`;
+        -   model 2: `exp(±t975(n−2)·residual_spread·√(1+1/n))`;
+    -   `fitted_track_ids`.
+-   `estimate_personal(ws, track_id, params, baseline_params, break_s,
+    delay_s, speed_multipliers=None)`: fits with the same `params` as the
+    estimate, adds the user's breaks and delay, and adds notes for what
+    the fit rests on, what the range means, and whether the track is part
+    of the fit.
+-   JSON `personal`: `provenance` = `fitted`, `model`, `n_activities`,
+    `n_routes`, `effort`, `loo_median_abs_error`, `range_multipliers`,
+    `range_meaning`.
+
 ## 8. Data quality
 
 ### 8.1 Read errors (`alpha.gpx.reader.GpxReadError`)
@@ -659,7 +779,7 @@ Used consistently in code, API, and UI (matching PROJECT_VISION.md):
 
 ## 10. Persistence (SQLite, MVP; ADR-002)
 
-Implemented in `alpha.persistence.schema` (schema version 3; additive
+Implemented in `alpha.persistence.schema` (schema version 4; additive
 upgrades from older versions run automatically). The data
 directory (default `data/local/`, git-ignored) holds `alpha.db` and
 `files/<sha256>.gpx`, an unmodified copy of every imported file. IDs are
@@ -730,6 +850,13 @@ user edits the track's kind or elevation source.
     `tiles_json`, `retrieved_at_utc`, `created_at_utc`, `point_count`
 -   `elevation_blob`: one float64 (little-endian) per track point; NaN =
     no data
+
+### `track_annotations` (schema 4; ADR-018)
+
+-   `track_id` (primary key, cascade), `effort` (`easy` | `normal` |
+    `hard` | null), `updated_at_utc`
+-   User annotations that the GPX does not contain; set only by
+    `alpha edit` / `PATCH`, never inferred.
 
 ### `terrain_slopes` (schema 3, unique `track_id, dataset_id`; ADR-015)
 

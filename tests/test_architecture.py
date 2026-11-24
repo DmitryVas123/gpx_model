@@ -82,6 +82,35 @@ FORBIDDEN_LAYER_IMPORTS = {
     "application": ("alpha.cli", "alpha.api", "alpha.report"),
 }
 
+# Fitting is pure: it sees samples, never storage, files, or the network
+# (ADR-005, ADR-016). The domain never imports it.
+MODELLING_ALLOWED = (
+    "alpha.domain",
+    "alpha.modelling",
+    "numpy",
+    "math",
+    "dataclasses",
+    "datetime",
+    "enum",
+    "collections",
+    "typing",
+    "__future__",
+)
+
+
+def test_modelling_is_pure() -> None:
+    for path in _python_files(SRC / "modelling"):
+        for module, level in _imports(path):
+            assert level == 0, f"{path.name}: use absolute imports"
+            assert module.startswith(MODELLING_ALLOWED), (
+                f"alpha.modelling/{path.name} must not import {module}"
+            )
+    for path in _python_files(SRC / "domain"):
+        for module, _ in _imports(path):
+            assert not module.startswith("alpha.modelling"), (
+                f"alpha.domain/{path.name} must not import {module}"
+            )
+
 
 @pytest.mark.parametrize("layer", sorted(FORBIDDEN_LAYER_IMPORTS))
 def test_layers_do_not_import_outer_layers(layer: str) -> None:

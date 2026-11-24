@@ -254,6 +254,44 @@ absent.
 
 ### Phase 7 --- Personal performance baseline
 
+-   ✅ Step 1 (ADR-016): `alpha.modelling` (pure, architecture-tested),
+    one speed multiplier on DIN 33466. Fitted in log space per route
+    group, with 95 % intervals for the average and for a single new
+    hike, leave-one-route-out validation, and a gate of 5 distinct
+    routes. `alpha baseline [--elevation …] [--json]`. With 4 activities:
+    not enough data (k would be ×1.82, LOO error median 17 %, max 44 %).
+-   ✅ Step 2 (ADR-017): flat and vertical factors (ascent and descent
+    share one, because loops cannot separate them). Grid-fitted per route
+    group, with jackknife intervals. Gates: 8 routes, and a route mix
+    (`v / h`) that varies by at least ×1.5. Shown next to model 1 with the
+    leave-one-route-out error of each. Preview on 4 activities: median
+    error 7 % vs 17 %, but the vertical factor's interval is still
+    0.36–31.
+-   ✅ Step 3 (ADR-018): effort annotation (`alpha edit ID --effort
+    easy|normal|hard`; schema 4, `track_annotations`). Baselines are
+    fitted on normal and untagged efforts by default (`--effort`
+    switches). Other efforts are compared with the fitted models and
+    summarised per label (hard ×2.08 vs not stated ×1.58, observed).
+    Finding: the hard efforts are also the steepest routes, so effort and
+    terrain are confounded until normal-effort steep hikes exist.
+-   ✅ Step 4 (ADR-019): `alpha scenarios --personal` (API
+    `assumptions=personal`, page selector, `GET /baseline`).
+    -   Uses the better-validated fitted model, with the same analysis
+        params as the estimate.
+    -   The range is the user's own 95 % single-hike variation.
+    -   No fallback: 409 `BASELINE_NOT_FITTED`.
+    -   With 7 activities (5 normal-effort routes, recorded elevation),
+        model 1 is fitted: ×1.46, LOO median 3 %. Model 2 needs 3 more
+        routes; its preview separates terrain from effort (Nebelhorn +20 %
+        effort instead of +56 %).
+
+**Phase 7 status:** the transparent baseline is complete and in use.
+Remaining, data-driven rather than code-driven: model 2 activates at 8
+normal-effort routes. An explicit effort factor and separate ascent and
+descent rates need more hard efforts and one-way routes (ADR-017,
+ADR-018). ML stays deferred: the transparent models already predict
+within a few percent.
+
 -   Dataset from activities only; profile bins with moving time are the
     natural training rows (gradient → vertical/horizontal speed).
 -   New package `alpha.modelling` (never inside `domain`, ADR-005): reads

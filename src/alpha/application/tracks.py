@@ -19,7 +19,7 @@ from alpha.domain.analysis import (
 )
 from alpha.domain.comparison import ComparisonResult, compare
 from alpha.domain.reference_elevation import with_elevation
-from alpha.domain.track import ElevationSource, Track, TrackKind
+from alpha.domain.track import Effort, ElevationSource, Track, TrackKind
 from alpha.gpx.reader import PARSER_NAME, PARSER_VERSION, read_gpx
 from alpha.persistence import (
     Database,
@@ -261,8 +261,11 @@ def edit_track(
     elevation_source: ElevationSource | None = None,
     planned_track_id: int | None = None,
     clear_planned_track: bool = False,
+    effort: Effort | None = None,
+    clear_effort: bool = False,
 ) -> TrackRecord:
-    """Record user corrections. Values set here are marked ``inferred_by=user``.
+    """Record user corrections and annotations (effort, ADR-018). Values set
+    here are marked ``inferred_by=user``.
 
     Linking requires this track to be an activity and the target a planned
     route (after applying ``kind``). Cached analyses are dropped when kind or
@@ -270,6 +273,8 @@ def edit_track(
     """
     if planned_track_id is not None and clear_planned_track:
         raise InvalidEditError("cannot set and clear the planned track at once")
+    if effort is not None and clear_effort:
+        raise InvalidEditError("cannot set and clear the effort at once")
     if elevation_source is ElevationSource.DEM_ENRICHED:
         raise InvalidEditError(
             "'dem_enriched' is set by ALPHA for sampled DEM series; use "
@@ -294,12 +299,18 @@ def edit_track(
                 )
         if kind is TrackKind.PLANNED and record.planned_track_id is not None:
             clear_planned_track = True  # a plan does not follow another plan
+        if effort is not None and new_kind is not TrackKind.ACTIVITY:
+            raise InvalidEditError(
+                f"track {track_id} is '{new_kind}'; effort applies to activities"
+            )
         repo.update_track(
             track_id,
             kind=kind,
             elevation_source=elevation_source,
             planned_track_id=planned_track_id,
             clear_planned_track=clear_planned_track,
+            effort=effort,
+            clear_effort=clear_effort,
         )
         if kind is not None or elevation_source is not None:
             repo.delete_analyses(track_id)
