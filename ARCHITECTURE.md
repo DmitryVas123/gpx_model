@@ -100,7 +100,8 @@ gpx_model/
 │   │   ├── tracks.py              # Workspace; import/list/show/compare/edit/delete
 │   │   ├── scenarios.py           # estimate_duration, estimate_personal
 │   │   ├── elevation.py           # enrich_track, elevation_check, get_tiles
-│   │   └── baseline.py            # personal_baseline, personal_assumptions
+│   │   ├── baseline.py            # personal_baseline, personal_assumptions
+│   │   └── profiles.py            # local profiles: folders, synthetic flag (ADR-021)
 │   ├── report.py                  # every JSON report (shared by CLI and API)
 │   ├── explain/
 │   │   ├── facts.py               # Fact, FactSet
@@ -114,7 +115,7 @@ gpx_model/
 │   │   └── config.py              # .env / environment (API key; never printed)
 │   └── api/
 │       ├── app.py                 # create_app: context, handlers, routers
-│       ├── context.py             # ApiContext (workspace, DEM, model) + dependencies
+│       ├── context.py             # ApiContext (profile, workspace, DEM, model) + dependencies
 │       ├── errors.py              # ApiError, exception -> status mapping
 │       ├── request_log.py         # one privacy-preserving log line per request
 │       ├── reports.py             # use case -> report, shared by routes
@@ -131,10 +132,13 @@ gpx_model/
 ├── scripts/
 │   ├── explore.py                 # old exploration sandbox; pandas/plotly allowed here
 │   ├── eval_explain.py            # validator and local-model evaluation (ADR-020)
+│   ├── simulate_baseline.py       # simulation study of the speed models (ADR-021)
+│   ├── synthetic_hikes.py         # synthetic GPX hikes with a known pace (ADR-021)
 │   └── build_site_docs.py         # collects the docs for the site (mkdocs.yml)
 ├── mkdocs.yml                     # documentation site; deployed by .github/workflows/docs.yml
 ├── data/
-│   └── local/                     # git-ignored: all real GPX, alpha.db, files/, dem/, golden/
+│   └── local/                     # git-ignored: all real GPX, alpha.db, files/, dem/, golden/,
+│                                  #   profiles/<name>/ (other profiles), synthetic/ (generated GPX)
 └── docs/adr/                      # decision records (index: docs/adr/README.md)
 ```
 
@@ -231,7 +235,9 @@ if transparent models stop being enough), PostGIS, and a map UI
 
 | Method and path | Purpose |
 |---|---|
-| `GET /health` | Liveness and version |
+| `GET /health` | Liveness, version, active profile, whether it is synthetic |
+| `GET /profiles` | Local profiles (names and synthetic flag only) |
+| `PUT /profile` | Switch the active profile: `{"name": "dev"}` (create profiles with the CLI) |
 | `POST /files?filename=` | Import GPX sent as the raw body (201 new / 200 already imported) |
 | `GET /tracks` | Stored tracks with summaries and `dem_datasets` |
 | `GET /tracks/{id}` | Full analysis; analysis options as query parameters |
@@ -256,16 +262,24 @@ if transparent models stop being enough), PostGIS, and a map UI
 
 | Status | Codes |
 |---|---|
-| 404 | `TRACK_NOT_FOUND` |
+| 404 | `TRACK_NOT_FOUND`, `PROFILE_NOT_FOUND` |
 | 409 | `INVALID_EDIT`, `DEM_PROFILE_MISSING`, `BASELINE_NOT_FITTED` |
 | 413 | `FILE_TOO_LARGE` |
 | 422 | `INVALID_REQUEST`, `INVALID_PARAMS`, `SCENARIO_INPUT`, GPX read codes |
 | 502 | `DEM_DOWNLOAD_FAILED` |
 | 503 | `DEM_UNAVAILABLE` |
 
-The CLI reads the OpenTopography key and the model name and passes them
-to `create_app(data_dir, dem_api_key, llm_model)`. `alpha.api` never
-reads the environment.
+The CLI reads the OpenTopography key, the model name, and the profile and
+passes them to `create_app(data_dir, dem_api_key, llm_model, profile)`.
+`alpha.api` never reads the environment.
+
+**Profiles (ADR-021).** `--profile NAME` (or `ALPHA_PROFILE`) selects a
+separate database inside the data directory; `default` is the data
+directory itself. There are no accounts: ALPHA stays single-user and
+local, and a profile only keeps data sets apart. The page switches the
+server's active profile with `PUT /profile`. A synthetic profile is for
+generated test hikes; its fits use them and every output from such a fit
+says so. Personal profiles never fit on generated hikes.
 
 ## 8. Reliability and observability
 
@@ -286,7 +300,9 @@ reads the environment.
 ## 9. Security and privacy
 
 -   Personal activities, the database, tiles, and `.env` live in
-    `data/local/` or are git-ignored. No real GPX file is committed,
+    `data/local/` or are git-ignored. Synthetic hikes generated from
+    personal paths contain real coordinates and stay there too
+    (`data/local/synthetic/`). No real GPX file is committed,
     including planned routes; only synthetic test fixtures are.
 -   Start and end points can reveal home or accommodation: they are
     never logged, and coordinates never appear in reports or logs.

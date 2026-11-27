@@ -176,6 +176,12 @@ in MVP_ROADMAP.md.
     -   nothing user-controlled enters the prompt as free text (the
         language is an allow-list).
 -   GPX metadata is untrusted data, not instructions.
+-   **Synthetic data** (ADR-021): generated hikes have the activity type
+    `synthetic-hiking` and are imported only into profiles created with
+    `--synthetic`. Personal profiles never fit on them. Every output from
+    a fit that used them is labelled (`synthetic_data`,
+    `[synthetic data]`, explanation caveat). Generated variants of
+    personal hikes contain real coordinates: keep them in `data/local/`.
 
 ## 8. Privacy
 

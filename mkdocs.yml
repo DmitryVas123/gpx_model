@@ -83,4 +83,5 @@ nav:
       - adr/018-effort-annotation.md
       - adr/019-personal-assumptions-in-scenarios.md
       - adr/020-explanations-and-local-llm.md
+      - adr/021-profiles-and-synthetic-data.md
   - For AI assistants: ai-assistants.md

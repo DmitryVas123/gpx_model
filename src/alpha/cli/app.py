@@ -16,6 +16,13 @@ from alpha.application.elevation import (
     get_tiles,
     plan_tiles,
 )
+from alpha.application.profiles import (
+    DEFAULT_PROFILE,
+    ProfileError,
+    create_profile,
+    list_profiles,
+    open_profile,
+)
 from alpha.application.scenarios import estimate_duration, estimate_personal
 from alpha.application.tracks import (
     DemProfileMissingError,
@@ -74,6 +81,7 @@ EXIT_UNAVAILABLE = 6
 
 DATA_DIR_ENV = "ALPHA_DATA_DIR"
 DEFAULT_DATA_DIR = Path("data") / "local"
+PROFILE_ENV = "ALPHA_PROFILE"
 
 # (option, AnalysisParams field, unit) exposed on analysing commands.
 PARAM_OPTIONS = (
@@ -90,6 +98,18 @@ def main(argv: Sequence[str] | None = None, out: TextIO | None = None) -> int:
     stream = out or _utf8_stdout()
     args = _parser().parse_args(argv)
     handler: Callable[[argparse.Namespace, TextIO], int] = args.handler
+    # --data-dir is the base folder; the profile picks the folder inside it
+    # (ADR-021). Terrain tiles stay shared in <base>/dem.
+    args.base_dir = args.data_dir
+    if args.command != "profile":
+        try:
+            profile = open_profile(args.base_dir, args.profile)
+        except ProfileError as exc:
+            print(f"error: {exc}", file=stream)
+            return EXIT_NOT_FOUND
+        args.profile_info = profile
+        args.data_dir = profile.data_dir
+        args.dem_dir = profile.dem_dir
     try:
         return handler(args, stream)
     except SchemaMismatchError as exc:
@@ -106,12 +126,22 @@ def _parser() -> argparse.ArgumentParser:
         help=f"database and stored GPX files (default: ${DATA_DIR_ENV} or "
         f"{DEFAULT_DATA_DIR.as_posix()})",
     )
+    parser.add_argument(
+        "--profile",
+        default=os.environ.get(PROFILE_ENV, DEFAULT_PROFILE),
+        help=f"local profile: a separate database inside the data directory "
+        f"(default: ${PROFILE_ENV} or '{DEFAULT_PROFILE}'; see 'alpha profile')",
+    )
     commands = parser.add_subparsers(dest="command", required=True)
 
     def command(
         name: str, help_text: str, handler: Callable[[argparse.Namespace, TextIO], int]
     ) -> argparse.ArgumentParser:
-        sub = commands.add_parser(name, help=help_text, description=help_text)
+        # No abbreviations: 'alpha show 1 --profile dev' must not be read as
+        # --profile-bin-m.
+        sub = commands.add_parser(
+            name, help=help_text, description=help_text, allow_abbrev=False
+        )
         sub.set_defaults(handler=handler)
         return sub
 
@@ -312,6 +342,18 @@ def _parser() -> argparse.ArgumentParser:
     )
     _add_analysis_options(sub)
 
+    sub = command("profile", "list or create local profiles (ADR-021)", _profile)
+    actions = sub.add_subparsers(dest="profile_action", required=True)
+    actions.add_parser("list", help="list profiles")
+    create = actions.add_parser("create", help="create an empty profile")
+    create.add_argument("name")
+    create.add_argument(
+        "--synthetic",
+        action="store_true",
+        help="for generated test hikes: its personal fits use them and are "
+        "labelled synthetic",
+    )
+
     sub = command("serve", "run the HTTP API and the local web page", _serve)
     sub.add_argument(
         "--host",
@@ -432,7 +474,7 @@ def _analyse_file(args: argparse.Namespace, out: TextIO) -> int:
 def _with_workspace(
     args: argparse.Namespace, out: TextIO, action: Callable[[Workspace], int]
 ) -> int:
-    ws = Workspace(args.data_dir)
+    ws = Workspace(args.data_dir, synthetic=args.profile_info.synthetic)
     try:
         return action(ws)
     except TrackNotFoundError as exc:
@@ -683,7 +725,7 @@ def _enrich(args: argparse.Namespace, out: TextIO) -> int:
         print(f"error: {exc}", file=out)
         return EXIT_BAD_PARAMS
     key = None if args.offline else opentopography_api_key()
-    provider = open_dem(args.data_dir / "dem", args.dataset, key)
+    provider = open_dem(args.dem_dir, args.dataset, key)
 
     def action(ws: Workspace) -> int:
         if args.all:
@@ -740,7 +782,7 @@ def _get_tiles(args: argparse.Namespace, out: TextIO) -> int:
         try:
             plan = plan_tiles(
                 ws,
-                args.data_dir / "dem",
+                args.dem_dir,
                 data,
                 args.dataset,
                 for_tracks=args.for_tracks,
@@ -841,10 +883,34 @@ def _report_for(
     )
 
 
+def _profile(args: argparse.Namespace, out: TextIO) -> int:
+    try:
+        if args.profile_action == "create":
+            created = create_profile(args.base_dir, args.name, synthetic=args.synthetic)
+            kind = "synthetic" if created.synthetic else "personal"
+            print(
+                f"created {kind} profile {created.name}: {created.data_dir}", file=out
+            )
+            print(f"use it with: alpha --profile {created.name} ...", file=out)
+            return EXIT_OK
+        for profile in list_profiles(args.base_dir):
+            kind = "synthetic" if profile.synthetic else "personal"
+            print(f"{profile.name:<16}{kind:<11}{profile.data_dir}", file=out)
+        return EXIT_OK
+    except ProfileError as exc:
+        print(f"error: {exc}", file=out)
+        return EXIT_INVALID
+
+
 def _serve(args: argparse.Namespace, out: TextIO) -> int:
     from alpha.api.server import run  # imported lazily: FastAPI is only needed here
 
-    print(f"ALPHA on http://{args.host}:{args.port}  (data: {args.data_dir})", file=out)
+    profile = args.profile_info
+    print(
+        f"ALPHA on http://{args.host}:{args.port}  (profile: {profile.name}"
+        f"{', synthetic data' if profile.synthetic else ''}; data: {args.data_dir})",
+        file=out,
+    )
     if args.host not in ("127.0.0.1", "localhost", "::1"):
         print(
             "warning: listening beyond this computer; the API has no authentication",
@@ -860,7 +926,7 @@ def _serve(args: argparse.Namespace, out: TextIO) -> int:
         ),
         file=out,
     )
-    run(args.data_dir, args.host, args.port, key, args.llm_model)
+    run(args.base_dir, args.host, args.port, key, args.llm_model, profile.name)
     return EXIT_OK
 
 

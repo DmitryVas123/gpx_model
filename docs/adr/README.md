@@ -24,6 +24,7 @@ text); a reversed decision gets a new ADR that supersedes it.
 | [018](018-effort-annotation.md) | Effort annotation by the user; baselines fit normal efforts | 7 | Accepted |
 | [019](019-personal-assumptions-in-scenarios.md) | Fitted speeds in scenarios, own variation as the range, no fallback | 7 | Accepted |
 | [020](020-explanations-and-local-llm.md) | Template explanations; a local model may reword them, validated | 8 | Accepted |
+| [021](021-profiles-and-synthetic-data.md) | Local profiles; labelled synthetic hikes; simulation study of the speed models | 7–8 | Accepted |
 
 Numbers not in the table were reserved during planning and never
 written:

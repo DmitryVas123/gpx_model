@@ -24,6 +24,9 @@
          font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
   header, main { max-width: 1100px; margin: 0 auto; padding: 16px; }
   header h1 { margin: 0; font-size: 20px; }
+  .head { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; }
+  .synthetic-banner { margin-top: 8px; padding: 6px 10px; border: 1px solid var(--warn);
+                      border-radius: 6px; color: var(--warn); font-size: 13px; }
   header p { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
   section { background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
             padding: 14px 16px; margin-bottom: 16px; }
@@ -61,9 +64,14 @@
 </head>
 <body>
 <header>
-  <h1>ALPHA</h1>
+  <div class="head">
+    <h1>ALPHA</h1>
+    <label>Profile <select id="profile-select" aria-label="Local profile"></select></label>
+  </div>
   <p>Measured, calculated, estimated, and unknown values for your GPX routes and activities.
      Not a navigation system; it never says a route is safe. Data stays on this computer.</p>
+  <p id="synthetic-banner" class="synthetic-banner" hidden>Synthetic profile: activities here
+     may be generated test hikes, and personal speeds fitted from them describe no real person.</p>
 </header>
 <main>
   <section>
@@ -613,12 +621,38 @@ function fillElevationSelect() {
   if ([...select.options].some((o) => o.value === previous)) select.value = previous;
 }
 
+// --- local profiles (ADR-021): separate databases, created with 'alpha profile' ----------
+async function loadProfiles() {
+  const info = await api("/profiles");
+  const select = $("profile-select");
+  select.replaceChildren(...info.profiles.map((p) =>
+    el("option", { value: p.name }, p.name + (p.synthetic_data ? " (synthetic)" : ""))));
+  select.value = info.active;
+  const active = info.profiles.find((p) => p.active);
+  $("synthetic-banner").hidden = !(active && active.synthetic_data);
+}
+
+$("profile-select").addEventListener("change", async (event) => {
+  selected = null;
+  $("detail").hidden = true;
+  for (const id of ["cmp-out", "sc-out", "bl-out", "import-status"]) $(id).replaceChildren();
+  try {
+    await api("/profile", {
+      method: "PUT", body: JSON.stringify({ name: event.target.value }),
+      headers: { "Content-Type": "application/json" },
+    });
+  } catch (e) { showError($("import-status"), e); }
+  await loadProfiles().catch(() => {});
+  await loadTracks().catch((e) => showError($("tracks"), e));
+});
+
 $("sc-source").addEventListener("change", () => {
   const personal = $("sc-source").value === "personal";
   for (const id of ["sc-h", "sc-up", "sc-down"]) $(id).disabled = personal;
 });
 $("elevation").addEventListener("change", () => { if (selected !== null) showTrack(selected); });
 api("/dem/datasets").then((info) => { demInfo = info; fillElevationSelect(); }).catch(() => {});
+loadProfiles().catch(() => {});
 loadTracks().catch((e) => showError($("tracks"), e));
 </script>
 </body>

@@ -114,7 +114,7 @@ def test_cli_and_report(tmp_path: Path) -> None:
     assert len(json.loads(text)["excluded"]) == 3
 
     report = baseline_report(view)
-    assert report["format_version"] == "11"
+    assert report["format_version"] == "12"
     assert report["n_routes"] == 3
     one = report["models"]["multiplier"]
     assert one["status"] == "fitted" and one["provenance"] == "fitted"

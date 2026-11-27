@@ -41,6 +41,12 @@ def _caveat(text: str) -> Statement:
     return Statement(text, (), caveat=True)
 
 
+SYNTHETIC_CAVEAT = (
+    "These speeds are fitted on generated test hikes, not on real recorded "
+    "activities, so they describe no real person."
+)
+
+
 # --- scenarios ---------------------------------------------------------------------
 
 
@@ -127,6 +133,8 @@ def scenarios(report: dict[str, Any]) -> Draft:
                 "personal.effort",
             )
         )
+        if personal.get("synthetic_data"):
+            out.append(_caveat(SYNTHETIC_CAVEAT))
 
     d = f.add("route.distance", "distance", inputs["distance_m"], "km", "calculated")
     asc = f.add("route.ascent", "ascent", inputs["ascent_m"], "m", "calculated")
@@ -456,6 +464,8 @@ def baseline(report: dict[str, Any]) -> Draft:
             "effort.fitted_on",
         )
     )
+    if report.get("synthetic_data"):
+        out.append(_caveat(SYNTHETIC_CAVEAT))
     need1 = f.add(
         "model1.min_routes", "routes model 1 needs", one["min_routes"], "count", "label"
     )

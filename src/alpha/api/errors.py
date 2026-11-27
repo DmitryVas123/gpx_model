@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 
 from alpha.api import schemas
 from alpha.application.baseline import BaselineNotFittedError
+from alpha.application.profiles import ProfileError
 from alpha.application.tracks import (
     DemProfileMissingError,
     InvalidEditError,
@@ -21,7 +22,10 @@ from alpha.gpx.reader import GpxReadError, ReadErrorCode
 
 # Documented on every route that can fail with them (OpenAPI).
 ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
-    404: {"model": schemas.ErrorResponse, "description": "TRACK_NOT_FOUND"},
+    404: {
+        "model": schemas.ErrorResponse,
+        "description": "TRACK_NOT_FOUND or PROFILE_NOT_FOUND",
+    },
     409: {
         "model": schemas.ErrorResponse,
         "description": "INVALID_EDIT, DEM_PROFILE_MISSING (run enrichment first), "
@@ -68,6 +72,7 @@ def error_response(
 # Exception type -> (status, code). Messages come from the exception.
 _MAPPED: tuple[tuple[type[Exception], int, str], ...] = (
     (TrackNotFoundError, 404, "TRACK_NOT_FOUND"),
+    (ProfileError, 404, "PROFILE_NOT_FOUND"),
     (InvalidEditError, 409, "INVALID_EDIT"),
     (DemProfileMissingError, 409, "DEM_PROFILE_MISSING"),
     (BaselineNotFittedError, 409, "BASELINE_NOT_FITTED"),

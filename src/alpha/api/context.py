@@ -1,5 +1,6 @@
-"""What every request shares (ADR-011): the workspace, the DEM and model
-settings from ``alpha serve``, and the common query dependencies.
+"""What every request shares (ADR-011): the active profile and its
+workspace (ADR-021), the DEM and model settings from ``alpha serve``, and
+the common query dependencies.
 
 ``ApiContext`` replaces loose ``app.state`` attributes with one typed object.
 The OpenTopography key lives only inside it; it is never returned or logged.
@@ -13,6 +14,7 @@ from typing import Annotated
 from fastapi import Depends, Query, Request
 
 from alpha.api.errors import invalid_params
+from alpha.application.profiles import Profile, open_profile
 from alpha.application.tracks import Workspace
 from alpha.dem import DATASETS, ElevationSampler, open_dem
 from alpha.domain.analysis import AnalysisParams
@@ -21,14 +23,42 @@ from alpha.modelling import BaselineParams
 
 @dataclass
 class ApiContext:
-    workspace: Workspace
-    data_dir: Path
+    base_dir: Path  # the data directory; profiles live inside it
+    profile: Profile
+    workspace: Workspace  # the active profile's database and files
     llm_model: str
     _dem_api_key: str | None = field(repr=False)
     # One enrichment at a time: tiles are written to a shared cache.
     dem_lock: threading.Lock = field(default_factory=threading.Lock)
     # One model call at a time (GPU memory); the model runs on request only.
     llm_lock: threading.Lock = field(default_factory=threading.Lock)
+    profile_lock: threading.Lock = field(default_factory=threading.Lock)
+
+    @classmethod
+    def open(
+        cls, base_dir: Path, profile: str, llm_model: str, dem_api_key: str | None
+    ) -> "ApiContext":
+        p = open_profile(base_dir, profile)
+        return cls(
+            base_dir,
+            p,
+            Workspace(p.data_dir, synthetic=p.synthetic),
+            llm_model,
+            dem_api_key,
+        )
+
+    def switch_profile(self, name: str) -> Profile:
+        """Make ``name`` the active profile for all later requests. Raises
+        ``ProfileError`` for an unknown profile; nothing changes then."""
+        profile = open_profile(self.base_dir, name)
+        with self.profile_lock:
+            if profile == self.profile:
+                return profile
+            old = self.workspace
+            self.workspace = Workspace(profile.data_dir, synthetic=profile.synthetic)
+            self.profile = profile
+        old.close()
+        return profile
 
     @property
     def dem_downloads_available(self) -> bool:
@@ -38,7 +68,7 @@ class ApiContext:
         """The sampler for a dataset; downloads only if allowed and a key exists."""
         try:
             return open_dem(
-                self.data_dir / "dem",
+                self.profile.dem_dir,
                 dataset_id,
                 self._dem_api_key if allow_download else None,
             )

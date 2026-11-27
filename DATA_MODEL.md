@@ -426,7 +426,7 @@ not.
 
 Every JSON output is built in `alpha.report` and is identical from the
 CLI (`--json`) and the API. Each report carries `format_version`
-(currently `"11"`).
+(currently `"12"`).
 
 | Report | CLI | API | Contents |
 |---|---|---|---|
@@ -470,6 +470,9 @@ Format history:
 -   10 added `personal` to scenario reports (§7.6, ADR-019): null for
     preset or user assumptions.
 -   11 added the explanation report (§7.7, ADR-020).
+-   12 added `synthetic_data` and `synthetic_track_ids` to the baseline
+    report and `synthetic_data` to the scenario `personal` section
+    (§7.8, ADR-021).
 
 The report itself contains:
 
@@ -771,7 +774,7 @@ are not part of `params_hash`. The baseline is fitted with the same
     of the fit.
 -   JSON `personal`: `provenance` = `fitted`, `model`, `n_activities`,
     `n_routes`, `effort`, `loo_median_abs_error`, `range_multipliers`,
-    `range_meaning`.
+    `range_meaning`, `synthetic_data` (§7.8).
 
 ### 7.7 Explanations (ADR-020)
 
@@ -820,6 +823,34 @@ are not part of `params_hash`. The baseline is fitted with the same
     `statements[{text, facts, caveat}]`, `boundary`, `fallback_reasons`,
     `notes`,
     and `facts[{key, label, display, provenance}]`.
+
+### 7.8 Profiles and synthetic data (ADR-021)
+
+-   A **profile** is a data folder with its own `alpha.db` and `files/`.
+    `default` is the data directory itself (`data/local/`); others live
+    in `<data directory>/profiles/<name>/` with a `profile.json`
+    (`{"synthetic": bool}`). Names: `[a-z0-9][a-z0-9_-]{0,31}`. An
+    unknown name is an error (`ProfileError`, API 404
+    `PROFILE_NOT_FOUND`), never a new empty folder. Terrain tiles stay
+    shared in `<data directory>/dem/`.
+-   Generated hikes have the GPX activity type `synthetic-hiking`
+    (`SYNTHETIC_ACTIVITY_TYPE`). It is not in
+    `BaselineParams.activity_types`, so personal profiles exclude them
+    with the usual reason.
+-   A **synthetic** profile (`Workspace(..., synthetic=True)`) adds
+    `synthetic-hiking` to the activity types of its fits. When any fitted
+    activity is synthetic:
+    -   `BaselineView.synthetic_track_ids` lists them; the baseline report
+        has `synthetic_data: true` and `synthetic_track_ids`;
+    -   `PersonalAssumptions.synthetic_data` is true, the assumptions'
+        label ends with `[synthetic data]`, and the scenario report's
+        `personal.synthetic_data` is true with an uncertainty note;
+    -   explanations add a caveat that the speeds describe no real
+        person (never sent to a model).
+-   `GET /health` reports `profile` and `synthetic_data`;
+    `GET /profiles` lists names and flags (no folder paths);
+    `PUT /profile {"name"}` switches the active profile of the running
+    server.
 
 ## 8. Data quality
 
@@ -901,8 +932,9 @@ Used consistently in code, API, and UI (matching PROJECT_VISION.md):
 
 Implemented in `alpha.persistence.schema` (schema version 4; additive
 upgrades from older versions run automatically). The data
-directory (default `data/local/`, git-ignored) holds `alpha.db` and
-`files/<sha256>.gpx`, an unmodified copy of every imported file. IDs are
+directory of a profile (default `data/local/`, git-ignored; §7.8) holds
+`alpha.db` and `files/<sha256>.gpx`, an unmodified copy of every imported
+file. IDs are
 integers. Times are stored as naive UTC.
 
 ``` text

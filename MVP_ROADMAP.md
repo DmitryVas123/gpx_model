@@ -8,7 +8,7 @@
     criteria are met and documented, not when its task list is empty.
 -   Infrastructure waits for a measured need (Phase 9).
 
-## Current state (2026-11-24)
+## Current state (2026-11-27)
 
 | Phase | Status | Delivered | ADRs |
 |---|---|---|---|
@@ -23,8 +23,8 @@
 | 8 AI explanation layer | ✅ | Template explanations; local Ollama model rewording with validation; CLI, API, page | 020 |
 | 9 Platform | not started | Map UI, background work, deployment: only when use justifies it | — |
 
-Versions: algorithm `0.3.0`, report format `11`, database schema `4`.
-The test suite has about 750 tests, including architecture rules and
+Versions: algorithm `0.3.0`, report format `12`, database schema `4`.
+The test suite has about 870 tests, including architecture rules and
 golden outputs.
 
 Reference data:
@@ -34,13 +34,23 @@ Reference data:
 -   COP30 for all of them and DGM1 for the Bavarian ones
     (DATA_MODEL.md §3).
 
+Since Phase 8, local profiles and a synthetic `dev` profile with
+generated hikes of known pace, plus a simulation study of the speed
+models (ADR-021).
+
 ## Open items
 
 ### Needs data or the owner's input
 
 -   **More normal-effort routes.** Three more activate the flat/vertical
-    model (8 routes, ADR-017). Steep normal-effort hikes help most, as
-    they separate "climbs fast" from "pushed hard" (ADR-018).
+    model (8 routes, ADR-017). Steep normal-effort hikes help most: in
+    the simulation two steep routes among 8 did as much for steep
+    predictions as 12 more similar routes (ADR-021).
+-   **Moving threshold for speed fits.** On generated hikes, slow steep
+    climbing under 0.3 m/s counts as stopped and inflates the climbing
+    factor (1.88 fitted vs 1.60 true; 1.63 at 0.15 m/s). Check how much
+    climbing time of Activities A and B lies between 0.15 and 0.3 m/s
+    before deciding on a fit-specific threshold (ADR-021).
 -   **One-way routes.** Separate ascent and descent rates need several;
     today they share one factor (ADR-017).
 -   **An explicit effort factor** needs about three hard and five normal

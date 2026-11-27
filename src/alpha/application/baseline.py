@@ -6,8 +6,9 @@ left out is reported with the reason, never dropped silently.
 """
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
+from alpha.application.profiles import SYNTHETIC_ACTIVITY_TYPE
 from alpha.application.tracks import (
     DemProfileMissingError,
     Workspace,
@@ -50,6 +51,13 @@ class BaselineView:
     # activities outside the fitted selection against the fitted models.
     effort_groups: tuple[EffortGroup, ...] = ()
     outside_effort: tuple[PaceVsModel, ...] = ()
+    # Generated activities among the fitted ones (synthetic profiles only,
+    # ADR-021). Any of them makes every output from the fit synthetic.
+    synthetic_track_ids: tuple[int, ...] = ()
+
+    @property
+    def synthetic_data(self) -> bool:
+        return bool(self.synthetic_track_ids)
 
 
 def personal_baseline(
@@ -59,7 +67,10 @@ def personal_baseline(
 ) -> BaselineView:
     p = params or AnalysisParams()
     bp = baseline_params or BaselineParams()
+    if ws.synthetic and SYNTHETIC_ACTIVITY_TYPE not in bp.activity_types:
+        bp = replace(bp, activity_types=(*bp.activity_types, SYNTHETIC_ACTIVITY_TYPE))
     samples: list[ActivitySample] = []
+    synthetic: set[int] = set()
     other_effort: list[ActivitySample] = []
     excluded: list[ExcludedActivity] = []
     with ws.db.transaction() as repo:
@@ -81,6 +92,8 @@ def personal_baseline(
                 )
             else:
                 samples.append(outcome)
+                if record.activity_type == SYNTHETIC_ACTIVITY_TYPE:
+                    synthetic.add(record.id)
     one = fit_speed_multiplier(samples, bp)
     two = fit_split_speeds(samples, bp)
     return BaselineView(
@@ -91,6 +104,7 @@ def personal_baseline(
         bp,
         effort_groups(samples + other_effort, bp.reference),
         pace_vs_models(other_effort, one.assumptions, two.assumptions),
+        tuple(sorted(synthetic)),
     )
 
 
@@ -150,6 +164,7 @@ class PersonalAssumptions:
     # new hike: the user's own variation, not a fixed +/- 20 %.
     range_multipliers: tuple[float, float, float]
     fitted_track_ids: tuple[int, ...]
+    synthetic_data: bool = False  # fitted on generated hikes (ADR-021)
 
 
 def personal_assumptions(view: BaselineView) -> PersonalAssumptions:
@@ -182,6 +197,11 @@ def personal_assumptions(view: BaselineView) -> PersonalAssumptions:
         chosen, n_act, n_routes = two.assumptions, two.n_activities, n
         multipliers = (factor, 1.0, 1 / factor)
         track_ids = tuple(r.sample.track_id for r in two.samples)
+    synthetic = bool(set(track_ids) & set(view.synthetic_track_ids))
+    if synthetic:
+        # Fitted on generated hikes (ADR-021): the label travels with the
+        # assumptions into every scenario and explanation.
+        chosen = replace(chosen, label=f"{chosen.label} [synthetic data]")
     return PersonalAssumptions(
         assumptions=chosen,
         model=model,
@@ -191,4 +211,5 @@ def personal_assumptions(view: BaselineView) -> PersonalAssumptions:
         median_abs_error=error,
         range_multipliers=multipliers,
         fitted_track_ids=track_ids,
+        synthetic_data=synthetic,
     )

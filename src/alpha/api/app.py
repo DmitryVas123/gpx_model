@@ -17,7 +17,7 @@ from alpha.api.context import ApiContext
 from alpha.api.errors import install_error_handlers
 from alpha.api.request_log import install_request_log
 from alpha.api.routers import ROUTERS
-from alpha.application.tracks import Workspace
+from alpha.application.profiles import DEFAULT_PROFILE
 from alpha.llm import DEFAULT_MODEL
 
 
@@ -25,19 +25,17 @@ def create_app(
     data_dir: Path,
     dem_api_key: str | None = None,
     llm_model: str = DEFAULT_MODEL,
+    profile: str = DEFAULT_PROFILE,
 ) -> FastAPI:
-    """``dem_api_key`` enables DEM downloads (``POST /tracks/{id}/dem``) and
-    ``llm_model`` names the local Ollama model. Both are passed in by the
-    entry point; the key is kept in memory and never returned or logged."""
+    """``data_dir`` is the base data directory and ``profile`` the profile
+    active at start (ADR-021). ``dem_api_key`` enables DEM downloads
+    (``POST /tracks/{id}/dem``) and ``llm_model`` names the local Ollama
+    model. Both are passed in by the entry point; the key is kept in memory
+    and never returned or logged."""
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        context = ApiContext(
-            workspace=Workspace(data_dir),
-            data_dir=data_dir,
-            llm_model=llm_model,
-            _dem_api_key=dem_api_key,
-        )
+        context = ApiContext.open(data_dir, profile, llm_model, dem_api_key)
         app.state.context = context
         try:
             yield

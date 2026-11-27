@@ -30,6 +30,30 @@ class ErrorResponse(Strict):
     error: ErrorBody
 
 
+class Health(Strict):
+    status: Literal["ok"]
+    version: str
+    profile: str
+    synthetic_data: bool = Field(
+        description="the active profile is for generated hikes (ADR-021)"
+    )
+
+
+class ProfileItem(Strict):
+    name: str
+    synthetic_data: bool
+    active: bool
+
+
+class Profiles(Strict):
+    active: str
+    profiles: list[ProfileItem]
+
+
+class ProfileSelection(Strict):
+    name: str
+
+
 class Metric(Strict):
     value: float | int | None = Field(description="null means unknown, never zero")
     unit: str
@@ -315,6 +339,7 @@ class PersonalInfo(Strict):
     loo_median_abs_error: float
     range_multipliers: list[float]
     range_meaning: str
+    synthetic_data: bool
 
 
 class Scenarios(Strict):
@@ -540,6 +565,8 @@ class Baseline(Strict):
     requirements: BaselineRequirements
     n_activities: int
     n_routes: int
+    synthetic_data: bool
+    synthetic_track_ids: list[int]
     models: BaselineModels
     effort: BaselineEffort
     activities: list[BaselineActivity]

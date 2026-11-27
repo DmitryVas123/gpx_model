@@ -58,10 +58,15 @@ class DemProfileMissingError(Exception):
 
 
 class Workspace:
-    """A data directory: ``alpha.db`` plus ``files/`` with the original GPX files."""
+    """A data directory: ``alpha.db`` plus ``files/`` with the original GPX files.
 
-    def __init__(self, root: Path) -> None:
+    ``synthetic``: the directory belongs to a synthetic profile (ADR-021), so
+    personal fits may use generated activities and label their outputs.
+    """
+
+    def __init__(self, root: Path, *, synthetic: bool = False) -> None:
         self.root = root
+        self.synthetic = synthetic
         self.db = Database(root / DATABASE_FILENAME)
         self.files = FileStore(root)
 

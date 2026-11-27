@@ -49,6 +49,28 @@ alpha serve                     # the same in the browser: http://127.0.0.1:8000
 Data lives in `data/local/` (git-ignored); use `--data-dir DIR` or
 `ALPHA_DATA_DIR` for another place.
 
+### Profiles and synthetic hikes
+
+A profile is a separate database on this computer: no accounts, no
+logins. `default` is your own data. A **synthetic** profile is for
+generated test hikes. Its personal speeds are fitted on them and are
+labelled `[synthetic data]` everywhere. Your own profile never uses
+generated hikes.
+
+``` bash
+alpha profile create dev --synthetic
+python scripts/synthetic_hikes.py --import-into dev             # variants of your hikes, known pace
+python scripts/synthetic_hikes.py --invented --import-into dev  # or invented paths only
+alpha --profile dev baseline                   # or set ALPHA_PROFILE=dev
+alpha profile list
+```
+
+`alpha serve` has a profile switch in the page header. The generated
+files and `manifest.json` (the true speeds) go to `data/local/synthetic/`.
+Variants of your hikes contain your real coordinates, so they are never
+committed. `python scripts/simulate_baseline.py` runs the simulation study
+behind ADR-021.
+
 ## Using ALPHA
 
 ### Analyse
