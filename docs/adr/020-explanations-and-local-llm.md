@@ -220,8 +220,16 @@ consistently and words it accordingly. The template stays the default.
     weather") changed an answer, and the validator rejected it.
 -   **English comparisons, before the last two guard fixes:** 6/12
     accepted. The rejection that was inspected was the "26 % for A" form
-    above. Comparisons have not been re-measured live after the fixes:
-    on this laptop the model ran on the CPU (78 s per answer).
+    above. During that run the model was on the CPU (78 s per answer),
+    after a CUDA error in Ollama ("shared object initialization failed").
+-   **Comparisons after the fixes, on the GPU** (updated graphics
+    driver; 4.2 GB of the model in GPU memory, 64–100 % peak GPU use per
+    request, checked after every answer):
+    -   English: 12/12 accepted;
+    -   German: 10/10 accepted. The session ended before the last 2 of
+        the 12.
+
+    Each answer took 25–31 s.
 
 **`keep_alive`:** the rewriter asks Ollama to keep the model loaded for
 15 minutes, so only the first explanation pays the load delay.
