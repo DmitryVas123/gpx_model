@@ -7,9 +7,9 @@ bump ALGORITHM_VERSION when calculations changed, then run
 
 and review the diff of the golden files before committing.
 
-Golden files for the shareable samples are committed in tests/regression/golden/.
-Golden files for personal activities live in data/local/golden/ (git-ignored)
-because they are derived from personal data.
+All reference GPX files are personal and live in data/local/ (git-ignored),
+so their golden files live in data/local/golden/ too. On a fresh clone these
+tests are skipped; the synthetic fixtures cover the same code paths.
 """
 
 import difflib
@@ -20,17 +20,12 @@ import pytest
 from alpha.domain.analysis import analyse
 from alpha.gpx.reader import read_gpx
 from alpha.report import file_report, to_json
+from tests.references import GOLDEN, reference
 
-ROOT = Path(__file__).resolve().parents[2]
-COMMITTED_GOLDEN = Path(__file__).resolve().parent / "golden"
-LOCAL_GOLDEN = ROOT / "data" / "local" / "golden"
+FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 
-CASES = [
-    ("data/samples/input.gpx", COMMITTED_GOLDEN),
-    ("data/samples/input2.gpx", COMMITTED_GOLDEN),
-    ("data/local/Nebelhorn_push.gpx", LOCAL_GOLDEN),
-    ("data/local/Gleitweg_Seealpsee_Zeigersattel.gpx", LOCAL_GOLDEN),
-]
+# Reference keys (tests/references.py); goldens are data/local/golden/<key>.json.
+CASES = ["plan_1", "plan_2", "activity_a", "activity_b"]
 
 
 def render(path: Path) -> str:
@@ -40,14 +35,10 @@ def render(path: Path) -> str:
     return to_json(file_report(path.name, data, doc, results))
 
 
-@pytest.mark.parametrize(
-    ("relative", "golden_dir"), CASES, ids=[Path(c[0]).stem for c in CASES]
-)
-def test_matches_golden(relative: str, golden_dir: Path, update_golden: bool) -> None:
-    source = ROOT / relative
-    if not source.exists():
-        pytest.skip(f"{relative} not present (personal data is not in Git)")
-    golden = golden_dir / f"{source.stem}.json"
+@pytest.mark.parametrize("key", CASES)
+def test_matches_golden(key: str, update_golden: bool) -> None:
+    source = reference(key)
+    golden = GOLDEN / f"{key}.json"
     actual = render(source)
 
     if update_golden:
@@ -68,9 +59,9 @@ def test_matches_golden(relative: str, golden_dir: Path, update_golden: bool) ->
                 n=1,
             )
         )
-        pytest.fail(f"analysis of {relative} changed:\n{diff[:4000]}")
+        pytest.fail(f"analysis of {key} changed:\n{diff[:4000]}")
 
 
 def test_render_is_deterministic() -> None:
-    path = ROOT / "data/samples/input.gpx"
-    assert render(path) == render(path)
+    for path in (FIXTURES / "route_only.gpx", FIXTURES / "activity_two_segments.gpx"):
+        assert render(path) == render(path)

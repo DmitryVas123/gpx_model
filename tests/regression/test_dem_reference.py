@@ -16,24 +16,23 @@ from alpha.domain.reference_elevation import (
     reference_knots,
 )
 from alpha.gpx.reader import read_gpx
+from tests.references import reference
 
 ROOT = Path(__file__).resolve().parents[2]
 CACHE = ROOT / "data/local/dem"
 
 
 @pytest.mark.parametrize(
-    ("relative", "dem_ascent_m"),
+    ("key", "dem_ascent_m"),
     [
-        ("data/samples/input.gpx", 1404),
-        ("data/samples/input2.gpx", 1331),
-        ("data/local/Nebelhorn_push.gpx", 1441),
-        ("data/local/Gleitweg_Seealpsee_Zeigersattel.gpx", 1311),
+        ("plan_1", 1404),
+        ("plan_2", 1331),
+        ("activity_a", 1441),
+        ("activity_b", 1311),
     ],
 )
-def test_dem_ascent_at_20_m_spacing(relative: str, dem_ascent_m: float) -> None:
-    path = ROOT / relative
-    if not path.exists():
-        pytest.skip(f"{relative} not present")
+def test_dem_ascent_at_20_m_spacing(key: str, dem_ascent_m: float) -> None:
+    path = reference(key)
     track = read_gpx(path.read_bytes()).tracks[0].track
     knots = reference_knots(track, 20.0)
     try:
@@ -50,22 +49,20 @@ def test_dem_ascent_at_20_m_spacing(relative: str, dem_ascent_m: float) -> None:
 
 
 @pytest.mark.parametrize(
-    ("relative", "dgm1_ascent_m", "drift_warning"),
+    ("key", "dgm1_ascent_m", "drift_warning"),
     [
-        # ADR-013/014: canopy effect on Gleitweg; barometer drift on Nebelhorn.
-        ("data/local/Nebelhorn_push.gpx", 1436, True),
-        ("data/local/Gleitweg_Seealpsee_Zeigersattel.gpx", 1239, False),
+        # ADR-013/014: canopy effect on activity_b; barometer drift on activity_a.
+        ("activity_a", 1436, True),
+        ("activity_b", 1239, False),
         # Forest walk: COP30 gives 1080 m, the terrain model 845 m (ADR-013).
-        ("data/local/Wanderung_am_Abend.gpx", 845, False),
-        ("data/local/Lunch_Hike.gpx", 578, False),
+        ("activity_d", 845, False),
+        ("activity_c", 578, False),
     ],
 )
 def test_terrain_model_ascent_and_drift(
-    relative: str, dgm1_ascent_m: float, drift_warning: bool
+    key: str, dgm1_ascent_m: float, drift_warning: bool
 ) -> None:
-    path = ROOT / relative
-    if not path.exists():
-        pytest.skip(f"{relative} not present")
+    path = reference(key)
     track = read_gpx(path.read_bytes()).tracks[0].track
     knots = reference_knots(track, 20.0)
     try:

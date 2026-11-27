@@ -1,0 +1,87 @@
+# Documentation site (GitHub Pages). The pages are the Markdown files in the
+# repository root and docs/adr/, collected by scripts/build_site_docs.py:
+#
+#   pip install -e ".[docs]"
+#   python scripts/build_site_docs.py && mkdocs serve      # preview
+#   python scripts/build_site_docs.py && mkdocs build --strict
+#
+# Deployed by .github/workflows/docs.yml on every push to master.
+
+site_name: ALPHA
+site_description: >-
+  Deterministic analysis of GPX planned routes and recorded hikes: metrics,
+  comparison, duration scenarios, terrain models, personal speeds, and
+  plain-language explanations. Local-first.
+site_url: https://dmitryvas123.github.io/gpx_model/
+repo_url: https://github.com/DmitryVas123/gpx_model
+repo_name: gpx_model
+edit_uri: ""
+docs_dir: build/site_src
+site_dir: site
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - search.highlight
+    - content.code.copy
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: blue grey
+      accent: teal
+      toggle:
+        icon: material/weather-night
+        name: Dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: blue grey
+      accent: teal
+      toggle:
+        icon: material/weather-sunny
+        name: Light mode
+
+markdown_extensions:
+  - smarty          # "---" in titles becomes a dash
+  - tables
+  - toc:
+      permalink: true
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+
+nav:
+  - Overview: index.md
+  - Vision: vision.md
+  - Data model: data-model.md
+  - Architecture: architecture.md
+  - Roadmap: roadmap.md
+  - Decisions:
+      - adr/index.md
+      - adr/001-modular-monolith.md
+      - adr/002-sqlite-storage.md
+      - adr/004-ascent-hysteresis.md
+      - adr/005-scenario-methods-and-assumptions.md
+      - adr/007-moving-time-and-stops.md
+      - adr/008-column-oriented-track.md
+      - adr/009-profile-bins-and-gradient.md
+      - adr/010-distance-jitter-filter.md
+      - adr/011-http-api-and-local-ui.md
+      - adr/012-dem-enrichment.md
+      - adr/013-local-terrain-model.md
+      - adr/014-elevation-drift-check.md
+      - adr/015-terrain-slope.md
+      - adr/016-personal-speed-baseline.md
+      - adr/017-flat-and-vertical-factors.md
+      - adr/018-effort-annotation.md
+      - adr/019-personal-assumptions-in-scenarios.md
+      - adr/020-explanations-and-local-llm.md
+      - adr/021-profiles-and-synthetic-data.md
+  - For AI assistants: ai-assistants.md

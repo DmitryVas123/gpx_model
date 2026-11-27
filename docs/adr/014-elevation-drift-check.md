@@ -8,12 +8,12 @@
 ## Context
 
 The elevation check (ADR-012) reports the median, spread, and largest
-difference between recorded elevation and a DEM. On Nebelhorn_push the
+difference between recorded elevation and a DEM. On Activity A the
 median is ≈ 0, yet near the summit the recorded series is about 40 m below
 both COP30 and DGM1 (ADR-013). The barometer drifted during the ascent.
 Neither the median nor the largest difference shows that the disagreement
 **grows along the track**. The largest difference cannot tell drift from a
-short spike, such as the 25 m excursion on Gleitweg at km 6.85.
+short spike, such as the 25 m excursion on Activity B at km 6.85.
 
 ## Decision
 
@@ -45,10 +45,10 @@ short spike, such as the 25 m excursion on Gleitweg at km 6.85.
 
 | Track | Range vs DGM1 | Range vs COP30 | Start → end (DGM1) | Warning |
 |---|---|---|---|---|
-| Nebelhorn_push | 47 m | 36 m | +2 → −36 m (mostly the last km) | yes |
-| Gleitweg… | 17 m | 13 m | +3 → +1 m | no |
-| Lunch Hike | 15 m | 21 m | +3 → +3 m | DGM1: no, COP30: yes |
-| Wanderung am Abend | 13 m | 22 m | +3 → +2 m | DGM1: no, COP30: yes |
+| Activity A | 47 m | 36 m | +2 → −36 m (mostly the last km) | yes |
+| Activity B | 17 m | 13 m | +3 → +1 m | no |
+| Activity C | 15 m | 21 m | +3 → +3 m | DGM1: no, COP30: yes |
+| Activity D | 13 m | 22 m | +3 → +2 m | DGM1: no, COP30: yes |
 
 **Against the terrain model the threshold separates cleanly:** 13–17 m
 for the three activities without drift, 47 m for the drifting one.
@@ -61,10 +61,10 @@ Window sensitivity, range vs DGM1:
 
 | Track | 300 m | 500 m | 1000 m |
 |---|---|---|---|
-| Nebelhorn_push | 49 m | 47 m | 33 m |
-| Gleitweg… | 24 m | 17 m | 12 m |
+| Activity A | 49 m | 47 m | 33 m |
+| Activity B | 24 m | 17 m | 12 m |
 
-500 m is the shortest window that keeps Gleitweg's local excursions below
+500 m is the shortest window that keeps Activity B's local excursions below
 20 m. It is still short enough to catch a drift that builds up over the
 last kilometre.
 

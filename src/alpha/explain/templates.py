@@ -11,7 +11,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from alpha.explain.facts import FactSet
+from alpha.explain.facts import FactSet, Unit
 
 
 @dataclass(frozen=True)
@@ -39,6 +39,12 @@ def _say(text: str, *keys: str | None) -> Statement:
 
 def _caveat(text: str) -> Statement:
     return Statement(text, (), caveat=True)
+
+
+SYNTHETIC_CAVEAT = (
+    "These speeds are fitted on generated test hikes, not on real recorded "
+    "activities, so they describe no real person."
+)
 
 
 # --- scenarios ---------------------------------------------------------------------
@@ -127,6 +133,8 @@ def scenarios(report: dict[str, Any]) -> Draft:
                 "personal.effort",
             )
         )
+        if personal.get("synthetic_data"):
+            out.append(_caveat(SYNTHETIC_CAVEAT))
 
     d = f.add("route.distance", "distance", inputs["distance_m"], "km", "calculated")
     asc = f.add("route.ascent", "ascent", inputs["ascent_m"], "m", "calculated")
@@ -456,6 +464,8 @@ def baseline(report: dict[str, Any]) -> Draft:
             "effort.fitted_on",
         )
     )
+    if report.get("synthetic_data"):
+        out.append(_caveat(SYNTHETIC_CAVEAT))
     need1 = f.add(
         "model1.min_routes", "routes model 1 needs", one["min_routes"], "count", "label"
     )
@@ -584,8 +594,155 @@ def baseline(report: dict[str, Any]) -> Draft:
     return f, tuple(out)
 
 
+# --- comparison --------------------------------------------------------------------
+
+# Gradient bands (DATA_MODEL.md §5.6) in words. Numbers here are the band
+# limits, part of the template's own wording.
+_BANDS = {
+    "< -25": "downhill steeper than 25 %",
+    "-25..-15": "downhill between 15 and 25 %",
+    "-15..-5": "downhill between 5 and 15 %",
+    "-5..5": "nearly level ground (under 5 %)",
+    "5..15": "uphill between 5 and 15 %",
+    "15..25": "uphill between 15 and 25 %",
+    "25..40": "uphill between 25 and 40 %",
+    ">= 40": "uphill steeper than 40 %",
+}
+
+# metric -> (key, words, unit, (word if B is more, if B is less))
+_METRICS: tuple[tuple[str, str, str, Unit, tuple[str, str]], ...] = (
+    ("distance_m", "distance", "distance", "km", ("longer", "shorter")),
+    ("ascent_m", "ascent", "ascent", "m", ("more", "less")),
+    ("descent_m", "descent", "descent", "m", ("more", "less")),
+    ("max_elevation_m", "highest", "highest point", "m", ("higher", "lower")),
+)
+
+
+def comparison(report: dict[str, Any]) -> Draft:
+    """Track B against track A (``alpha compare A B``). Values stand next to
+    their letter ("B 554 m, A 1192 m"), so ``guards.pair_problems`` can tell
+    a swap; the direction of each difference is a fact of its own."""
+    f = FactSet()
+    out: list[Statement] = []
+    ta = f.add("a.track", "track A", f"#{report['a']['id']}", "text", "label")
+    tb = f.add("b.track", "track B", f"#{report['b']['id']}", "text", "label")
+    out.append(
+        _say(
+            f"This compares track B ({f.show(tb or '')}) against track A "
+            f"({f.show(ta or '')}).",
+            ta,
+            tb,
+        )
+    )
+    metrics = {m["metric"]: m for m in report["metrics"]}
+    for metric, key, words, unit, (up, down) in _METRICS:
+        m = metrics.get(metric)
+        if m is None or m["a"] is None or m["b"] is None:
+            continue
+        a = f.add(f"a.{key}", f"{words} of track A", m["a"], unit, "calculated")
+        b = f.add(f"b.{key}", f"{words} of track B", m["b"], unit, "calculated")
+        assert a and b
+        delta = float(m["b"]) - float(m["a"])
+        if f[a].display() == f[b].display():
+            out.append(
+                _say(f"Both have the same {words}: B {f.show(b)}, A {f.show(a)}.", a, b)
+            )
+            continue
+        word = up if delta > 0 else down
+        d = f.add(
+            f"diff.{key}", f"difference in {words}", abs(delta), unit, "calculated"
+        )
+        w = f.add(f"dir.{key}", f"B against A in {words}", word, "text", "label")
+        assert d and w
+        if key == "distance":
+            text = f"B is {f.show(d)} {word} than A: B {f.show(b)}, A {f.show(a)}."
+        elif key == "highest":
+            text = (
+                f"The highest point of B is {f.show(d)} {word} than that of A: "
+                f"B {f.show(b)}, A {f.show(a)}."
+            )
+        else:
+            text = (
+                f"B has {f.show(d)} {word} {words} than A: B {f.show(b)} of "
+                f"{words}, A {f.show(a)}."
+            )
+        out.append(_say(text, d, w, b, a))
+
+    moving = metrics.get("moving_time_s")
+    if moving and moving["a"] is not None and moving["b"] is not None:
+        a = f.add(
+            "a.moving", "moving time of track A", moving["a"], "duration", "observed"
+        )
+        b = f.add(
+            "b.moving", "moving time of track B", moving["b"], "duration", "observed"
+        )
+        assert a and b
+        out.append(_say(f"Recorded moving time: B {f.show(b)}, A {f.show(a)}.", b, a))
+
+    bands = [
+        g for g in report["gradient_bands_m"] if g["material"] and g["band"] in _BANDS
+    ]
+    if bands:
+        g = max(bands, key=lambda x: abs(x["delta"]))
+        label = f.add("band.label", "gradient band", _BANDS[g["band"]], "text", "label")
+        a = f.add(
+            "a.band", "distance of track A in that band", g["a"], "km", "calculated"
+        )
+        b = f.add(
+            "b.band", "distance of track B in that band", g["b"], "km", "calculated"
+        )
+        d = f.add(
+            "diff.band", "difference in that band", abs(g["delta"]), "km", "calculated"
+        )
+        word = "more" if g["delta"] > 0 else "less"
+        w = f.add("dir.band", "B against A in that band", word, "text", "label")
+        assert label and a and b and d and w
+        out.append(
+            _say(
+                f"The largest difference by gradient is on {_BANDS[g['band']]}: "
+                f"B has {f.show(d)} {word} of it than A, B {f.show(b)}, "
+                f"A {f.show(a)}.",
+                label,
+                d,
+                w,
+                b,
+                a,
+            )
+        )
+
+    steep = report.get("steepest_climb") or {}
+    if steep.get("a") and steep.get("b"):
+        a = f.add(
+            "a.steepest",
+            "mean gradient of the steepest climb of track A",
+            steep["a"]["mean_gradient_percent"] / 100,
+            "percent",
+            "calculated",
+        )
+        b = f.add(
+            "b.steepest",
+            "mean gradient of the steepest climb of track B",
+            steep["b"]["mean_gradient_percent"] / 100,
+            "percent",
+            "calculated",
+        )
+        assert a and b
+        out.append(
+            _say(
+                f"The steepest climb section averages B {f.show(b)}, A {f.show(a)}.",
+                b,
+                a,
+            )
+        )
+    # ALPHA's own notes: unknown values, different sources, and that the
+    # differences describe the tracks only. Shown verbatim, never reworded.
+    out += [_caveat(note) for note in report["notes"]]
+    return f, tuple(out)
+
+
 TOPICS: dict[str, Callable[[dict[str, Any]], Draft]] = {
     "scenarios": scenarios,
     "elevation": elevation,
     "baseline": baseline,
+    "comparison": comparison,
 }

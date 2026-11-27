@@ -13,6 +13,7 @@ from typing import Any
 
 from alpha.application.baseline import BaselineView, PersonalAssumptions
 from alpha.application.elevation import ElevationView
+from alpha.application.profiles import Profile
 from alpha.application.scenarios import ObservedTime
 from alpha.domain.analysis import (
     ALGORITHM_VERSION,
@@ -42,7 +43,7 @@ from alpha.persistence import DemProfileRecord, TrackRecord
 # 9: track records gained "effort"; baseline report gained "effort"
 # 10: scenario report gained "personal" (fitted assumptions, ADR-019)
 # 11: explanation report (ADR-020)
-REPORT_FORMAT_VERSION = "11"
+REPORT_FORMAT_VERSION = "12"
 
 
 def elevation_series_report(dem: DemProfileRecord | None) -> dict[str, Any]:
@@ -580,6 +581,9 @@ def baseline_report(view: BaselineView) -> dict[str, Any]:
         },
         "n_activities": f.n_activities,
         "n_routes": f.n_groups,
+        # Generated activities among the fitted ones (synthetic profile, ADR-021).
+        "synthetic_data": view.synthetic_data,
+        "synthetic_track_ids": list(view.synthetic_track_ids),
         "models": {"multiplier": multiplier, "split": split},
         "effort": {
             "fitted_on": bp.effort,
@@ -625,6 +629,7 @@ def _personal_report(p: PersonalAssumptions | None) -> dict[str, Any] | None:
         "loo_median_abs_error": round(p.median_abs_error, 4),
         "range_multipliers": [round(k, 4) for k in p.range_multipliers],
         "range_meaning": "95 % range for a single new hike (own variation)",
+        "synthetic_data": p.synthetic_data,
     }
 
 
@@ -650,5 +655,17 @@ def explanation_report(e: Explanation, notes: Sequence[str] = ()) -> dict[str, A
                 "provenance": f.provenance,
             }
             for f in (e.facts or ())
+        ],
+    }
+
+
+def profiles_report(profiles: Sequence[Profile], active: Profile) -> dict[str, Any]:
+    """Local profiles (ADR-021). Paths are not reported: the page needs only
+    names, and the folder layout stays on this computer."""
+    return {
+        "active": active.name,
+        "profiles": [
+            {"name": p.name, "synthetic_data": p.synthetic, "active": p == active}
+            for p in profiles
         ],
     }

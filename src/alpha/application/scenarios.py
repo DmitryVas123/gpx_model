@@ -134,6 +134,11 @@ def estimate_personal(
         f"(effort '{personal.effort}'); leave-one-route-out error median "
         f"{personal.median_abs_error:.0%}."
     ]
+    if personal.synthetic_data:
+        notes.append(
+            "Fitted on generated test hikes (synthetic profile): these speeds "
+            "describe no real person."
+        )
     if speed_multipliers is not None and len(speed_multipliers) > 1:
         notes.append(
             f"The range ({min(speed_multipliers):.3g}x to "

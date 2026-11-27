@@ -2,7 +2,9 @@
 
 -   **Status:** Accepted
 -   **Date:** 2026-11-22
--   **Code:** `alpha.api` (`app.py`, `schemas.py`, `server.py`, `static/index.html`)
+-   **Code:** `alpha.api`: `app.py` (wiring), `context.py`, `errors.py`,
+    `request_log.py`, `reports.py`, `routers/`, `schemas.py`,
+    `server.py`, `static/index.html`
 
 ## Context
 
@@ -69,6 +71,17 @@ local-first, and the data (personal activities) is sensitive.
     take ≤ 0.6 s for 25k points and requests take milliseconds; sync
     handlers run in FastAPI's thread pool, and the upload handler
     offloads the import to it. Revisit only with a measured need.
+
+-   **Structure (2026-11-24):** one router per topic in
+    `alpha.api.routers` (`meta`, `tracks`, `analysis`, `elevation`,
+    `explanations`).
+    -   `create_app` only wires them together with the error handlers
+        (`errors.py`) and the request log (`request_log.py`).
+    -   Shared state is one typed `ApiContext` (`context.py`) holding
+        the workspace, the DEM sampler, and the model name with its lock.
+        The OpenTopography key is a private field, left out of `repr`.
+    -   Report building used by several routes lives in `reports.py`.
+    -   The split left the OpenAPI document byte-for-byte unchanged.
 
 ## Consequences
 

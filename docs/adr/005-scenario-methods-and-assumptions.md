@@ -75,8 +75,8 @@ On the reference data with DIN 33466 standard values:
 
 | Track | Inputs | DIN baseline moving | Observed moving | Implied multiplier |
 |---|---|---|---|---|
-| input.gpx (plan) | 6.81 km, +1368 / −0 m | 5:25 h | — | — |
-| Nebelhorn_push (linked) | 8.33 km, +1377 / −18 m | ~5:40 h | 2:29 h | ×2.28 |
+| Plan 1 (plan) | 6.81 km, +1368 / −0 m | 5:25 h | — | — |
+| Activity A (linked) | 8.33 km, +1377 / −18 m | ~5:40 h | 2:29 h | ×2.28 |
 
 The standard values are far from this user's pace. That is exactly why
 assumptions must be visible and why fitted assumptions (Phase 7) need a

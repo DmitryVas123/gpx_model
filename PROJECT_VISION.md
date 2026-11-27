@@ -10,6 +10,13 @@ time, and inspect the uncertainty behind those estimates.
 ALPHA does **not** choose a route on behalf of the user. It makes route
 and performance information easier to reason about.
 
+**Where it stands (2026-11-24):**
+-   The MVP (§6) is complete.
+-   So are the first post-MVP capabilities: terrain models, personal
+    speeds, and plain-language explanations (§8).
+
+See [MVP_ROADMAP.md](MVP_ROADMAP.md) for details.
+
 ## 2. Problem
 
 Route-planning tools commonly show a line on a map, distance, and
@@ -68,6 +75,16 @@ social features, and public route sharing are outside the initial scope.
     experience. Time metrics of the planned route are shown as
     unknown, and scenario estimates are labelled as estimates.
 
+### Journey D --- Learn your own pace (post-MVP)
+
+1.  Mark activities that were unusually hard or easy.
+2.  See personal speeds fitted from the normal ones, with how many
+    routes they rest on and how far off they were for routes left out.
+    The answer is "not enough data" until there are enough.
+3.  Estimate a planned route with those speeds and your own variation
+    between hikes as the range.
+4.  Read the result explained in plain language.
+
 Terms such as profile bin, climb section, and elevation source are
 defined in [DATA_MODEL.md](DATA_MODEL.md) §2.
 
@@ -83,8 +100,10 @@ defined in [DATA_MODEL.md](DATA_MODEL.md) §2.
     reliable until sufficient representative data exists.
 5.  **Safety over engagement:** no "safe/unsafe" verdict, no avalanche
     inference, and no encouragement to continue in dangerous conditions.
-6.  **Local-first:** user GPX files and activity history remain local in
-    the MVP.
+6.  **Local-first:** user GPX files and activity history stay on the
+    user's computer. Network access happens only on explicit request:
+    -   terrain tiles, which never include the track itself;
+    -   a language model running locally.
 7.  **Modular evolution:** begin with a modular monolith; extract
     workers/services only when a measured need appears.
 
@@ -113,8 +132,11 @@ The MVP answers one narrow question:
 
 ### Excluded from MVP
 
--   LLM-generated advice.
--   ML prediction trained on personal activity.
+-   LLM-generated advice. After the MVP, a local model may only
+    **reword** ALPHA's own explanations, checked against the report. It
+    gives no advice.
+-   ML prediction trained on personal activity. After the MVP, personal
+    speeds are transparent fits with validation, not ML.
 -   Weather and avalanche integrations.
 -   Live navigation or turn-by-turn guidance.
 -   Automatic route discovery.
@@ -140,14 +162,15 @@ The MVP is successful when:
 
 After the MVP, ALPHA may evolve through these capabilities:
 
--   Terrain raster enrichment using a suitable elevation model.
--   More detailed segment classification.
--   A personal performance baseline.
--   Statistical duration modelling with uncertainty intervals.
--   Scenario simulation for pace, breaks, and delays.
--   AI-generated explanations grounded only in computed analysis and
-    supplied data.
--   A map-centric web UI.
+| Capability | Status |
+|---|---|
+| Terrain raster enrichment using a suitable elevation model | ✅ Copernicus GLO-30 and Bavaria DGM1; terrain slope (Phase 6) |
+| A personal performance baseline | ✅ fitted speeds with validation and effort (Phase 7) |
+| Statistical duration modelling with uncertainty intervals | ✅ ranges from the user's own variation (Phase 7) |
+| Scenario simulation for pace, breaks, and delays | ✅ speed multipliers, breaks, delay (Phase 4) |
+| AI-generated explanations grounded only in computed analysis | ✅ templates, optionally reworded by a local model and validated (Phase 8) |
+| More detailed classification of route sections | open |
+| A map-centric web UI | open (Phase 9, when justified) |
 
 ## 9. Risk and limitations
 
@@ -160,7 +183,10 @@ After the MVP, ALPHA may evolve through these capabilities:
 -   A model trained on a small set of the user's hikes can overfit and
     generalize poorly.
 -   Slope derived from track-point elevation is not the same as terrain
-    slope from a high-resolution DEM.
+    slope from a high-resolution DEM. ALPHA reports both separately.
+-   Elevation models differ: a surface model adds treetops in forest, and
+    a barometer can drift. ALPHA shows the series side by side instead of
+    choosing one silently.
 -   Technical difficulty, exposure, rock/ice conditions, and avalanche
     danger cannot be inferred reliably from a GPX line alone.
 

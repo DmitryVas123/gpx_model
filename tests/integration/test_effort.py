@@ -99,7 +99,7 @@ def test_baseline_fits_normal_efforts_and_compares_the_rest(ws: Workspace) -> No
     )
 
     report = baseline_report(view)
-    assert report["format_version"] == "11"
+    assert report["format_version"] == "12"
     assert report["effort"]["fitted_on"] == "normal"
     assert report["effort"]["included"] == ["normal", "not stated"]
     assert report["effort"]["outside_fit"][0]["effort"] == "hard"

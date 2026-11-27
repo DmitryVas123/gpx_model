@@ -8,7 +8,7 @@
 ## Context
 
 The speed models (ADR-016, ADR-017) treat every activity as a sample of
-the same pace. The user reports that Nebelhorn_push and Gleitweg were
+the same pace. The user reports that Activity A and Activity B were
 **hard** efforts. A baseline for planning should describe ordinary hikes.
 Pushing hard is not terrain, and ALPHA cannot detect it from the GPX
 (heart rate is not imported, and pace alone confounds effort with
@@ -52,8 +52,8 @@ terrain).
 
 | Effort | Activities | Observed × DIN standard |
 |---|---|---|
-| hard (Nebelhorn_push, Gleitweg) | 2 | ×2.08 |
-| not stated (Lunch Hike, Wanderung am Abend) | 2 | ×1.58 |
+| hard (Activity A, Activity B) | 2 | ×2.08 |
+| not stated (Activity C, Activity D) | 2 | ×1.58 |
 
 **Effort and terrain are confounded in this data.** The two hard efforts
 are also the steepest and longest climbs:
@@ -61,7 +61,7 @@ are also the steepest and longest climbs:
 -   With the default selection, 2 routes remain, and their mix (`v / h`)
     varies by only ×1.24. The flat/vertical split (ADR-017) could not be
     separated even with enough routes.
--   ADR-017's preview ("vertical ×3.37") rested mostly on Nebelhorn_push.
+-   ADR-017's preview ("vertical ×3.37") rested mostly on Activity A.
     Part of that is probably effort, not climbing ability.
 
 ## Consequences

@@ -12,8 +12,8 @@ distances for the two reference activities exposed a large bias:
 
 | Activity | Strava | Sum of 1 Hz steps |
 |---|---|---|
-| Nebelhorn_push | 8.30 km | 9.93 km (+20 %) |
-| Gleitweg, Seealpsee, Zeigersattel | 20.80 km | 23.68 km (+14 %) |
+| Activity A | 8.30 km | 9.93 km (+20 %) |
+| Activity B | 20.80 km | 23.68 km (+14 %) |
 
 At 1 Hz, GPS position noise of about a metre is comparable to the
 distance actually walked per second (median step 0.6–1.0 m). The
@@ -30,7 +30,7 @@ than its nominal length.
 
 Filtered distance against Strava:
 
-| Method | Nebelhorn | Gleitweg |
+| Method | Activity A | Activity B |
 |---|---|---|
 | Subsample every 5 s / 10 s | +3 % / −2 % | +1 % / −2 % |
 | Rolling mean of positions, 10 s | −1 % | −2 % |
@@ -70,7 +70,7 @@ changes distance by only 0.05–0.10 %.
     threshold, but a poor-fix recording may not.
 -   Very tight switchbacks (turns shorter than 3 m) are slightly cut.
 -   **Recorded gradients rose as expected.** The steepest 50 m bin of
-    Nebelhorn_push went from 38 % (0.1.0) to 56 % (0.2.0). That bin climbs
+    Activity A went from 38 % (0.1.0) to 56 % (0.2.0). That bin climbs
     28 m in 185 s near 2,150 m; its jittery raw path is 73 m and the
     straight line 41 m, so 50 m of filtered distance is plausible. The
     planned route to the same summit peaks at 48–49 %. The sensitivity is

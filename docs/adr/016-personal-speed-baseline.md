@@ -80,7 +80,7 @@ parameter (`--min-routes`) and is reported in every output.
 | k | ×1.82 |
 | Average, 95 % | ×1.32 – ×2.50 |
 | One new hike, 95 % | ×0.89 – ×3.71 |
-| Leave-one-route-out error | median 17 %, max 44 % (Nebelhorn_push) |
+| Leave-one-route-out error | median 17 %, max 44 % (Activity A) |
 
 The largest error is the steepest and hardest effort. This suggests that
 one multiplier for flat and climbing speed together does not fit. The

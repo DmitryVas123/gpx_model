@@ -1,156 +1,273 @@
 # ALPHA --- Mountain Decision Intelligence
 
-**Language:** Python\
-**Status:** MVP complete (Phases 0–5): CLI, local HTTP API, and web page.
-Next: post-MVP phases; see [MVP_ROADMAP.md](MVP_ROADMAP.md).
+ALPHA analyses GPX planned routes and recorded hikes on your own
+computer. It shows:
 
-ALPHA analyses GPX planned routes and recorded activities. It
-calculates distance, ascent, gradient and climb sections, compares a
-planned route with past activities, and estimates durations from
-assumptions the user sets explicitly.
+-   distance, ascent, gradient, and the steep sections of a route;
+-   how a plan compares with hikes you have done;
+-   how long a route may take, from assumptions you can see. These can
+    be published standard speeds or speeds fitted from your own
+    activities.
+
+It explains its results in plain language, optionally reworded by a
+local language model.
+
+**Status:** Phases 0–8 done (analysis, storage, comparison, scenarios,
+API and page, terrain models, personal speeds, explanations). Only
+Phase 9 (map UI, deployment) remains, and it waits for a real need;
+see [MVP_ROADMAP.md](MVP_ROADMAP.md).
+
+ALPHA is not a navigation system, guide, or safety service. It never says
+a route is safe or that you should go (see [Safety boundary](#safety-boundary)).
 
 ## Documentation
 
--   [Project Vision](PROJECT_VISION.md): problem, user, journeys,
-    principles, scope.
--   [Data Model](DATA_MODEL.md): glossary, metric definitions,
-    contracts, persistence, data quality. Start here for any
-    calculation.
--   [Architecture](ARCHITECTURE.md): modules, dependency rules, source
-    tree by phase, ADR list.
--   [MVP and Roadmap](MVP_ROADMAP.md): current state, phases, exit
-    criteria, first backlog.
--   [CLAUDE.md](CLAUDE.md): rules for AI coding assistants working in
-    this repository.
+| Document | Read it for |
+|---|---|
+| [PROJECT_VISION.md](PROJECT_VISION.md) | Why ALPHA exists, user journeys, principles, scope |
+| [DATA_MODEL.md](DATA_MODEL.md) | Every metric, formula, contract, report format, and table. **Authoritative for calculations.** |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Packages, dependency rules, data flows, API, security |
+| [MVP_ROADMAP.md](MVP_ROADMAP.md) | What is done, what is open, phase exit criteria |
+| [docs/adr/](docs/adr/README.md) | The reasoning and measurements behind each decision |
+| [CLAUDE.md](CLAUDE.md) | Rules for AI coding assistants in this repository |
 
-## Development
+## Quick start
 
 Requires Python 3.12+.
 
 ``` bash
 python -m venv .venv
-.venv\Scripts\activate            # Windows; on Linux/macOS: source .venv/bin/activate
-pip install -e ".[dev]"           # add ,explore for scripts/explore.py
+.venv\Scripts\activate          # Windows; Linux/macOS: source .venv/bin/activate
+pip install -e ".[dev]"         # add ,explore for scripts/explore.py
 
-ruff check . && ruff format --check . && mypy && pytest
+alpha import my-hike.gpx        # store and analyse
+alpha list                      # what is stored
+alpha show 1                    # full analysis
+alpha serve                     # the same in the browser: http://127.0.0.1:8000
 ```
 
-### Command line
+Data lives in `data/local/` (git-ignored); use `--data-dir DIR` or
+`ALPHA_DATA_DIR` for another place.
 
-Single files, nothing stored:
+### Profiles and synthetic hikes
+
+A profile is a separate database on this computer: no accounts, no
+logins. `default` is your own data. A **synthetic** profile is for
+generated test hikes. Its personal speeds are fitted on them and are
+labelled `[synthetic data]` everywhere. Your own profile never uses
+generated hikes.
 
 ``` bash
-alpha inspect FILE.gpx        # tracks, inferred kind/elevation source, data-quality warnings
-alpha analyse FILE.gpx        # distance, ascent, time, gradient distribution, climb sections
-alpha analyse FILE.gpx --json # full versioned report incl. 50 m profile (DATA_MODEL.md §6.1)
-alpha analyse FILE.gpx --moving-min-speed-m-s 0.25 --profile-bin-m 25   # change assumptions
+alpha profile create dev --synthetic
+python scripts/synthetic_hikes.py --import-into dev             # variants of your hikes, known pace
+python scripts/synthetic_hikes.py --invented --import-into dev  # or invented paths only
+alpha --profile dev baseline                   # or set ALPHA_PROFILE=dev
+alpha profile list
 ```
 
-Stored tracks (database and original copies in `data/local/`, or
-`--data-dir DIR` / `ALPHA_DATA_DIR`):
+`alpha serve` has a profile switch in the page header. The generated
+files and `manifest.json` (the true speeds) go to `data/local/synthetic/`.
+Variants of your hikes contain your real coordinates, so they are never
+committed. `python scripts/simulate_baseline.py` runs the simulation study
+behind ADR-021.
+
+## Using ALPHA
+
+### Analyse
 
 ``` bash
-alpha import a.gpx b.gpx      # store and analyse; re-importing identical bytes is a no-op
-alpha list                    # ID, kind (? = guessed), date, distance, ascent, moving time
-alpha show 3 [--json]         # full analysis of a stored track (same options as analyse)
-alpha compare 1 3 [--json]    # track 3 against track 1: metrics, gradient bands, climbs, notes
-alpha edit 3 --planned-track 1             # link an activity to the plan it followed
-alpha edit 1 --kind planned --elevation-source planner_dem   # confirm or correct guesses
-alpha edit 2 --effort hard                # your own judgement; baselines fit normal efforts
-alpha scenarios 1 --break-min 30          # DIN 33466 estimate range + observed times
-alpha scenarios 1 --horizontal-speed-km-h 5 --ascent-rate-m-h 500   # your own assumptions
-alpha baseline                            # personal speeds: one multiplier (5 routes), flat/vertical (8)
-alpha scenarios 1 --personal --break-min 30   # estimate with your fitted speeds and own range
-alpha explain scenarios 1 --personal          # the same in plain language (templates)
-alpha explain baseline --llm                  # reworded by a local Ollama model, numbers checked
-alpha enrich 3                # DEM elevation (opt-in download) vs recorded elevation
-alpha enrich --all            # every track that has no DEM elevation yet
-alpha show 3 --elevation dem:COP30         # any analysis on the DEM series instead
-alpha compare 1 3 --elevation dem:COP30    # (both tracks need `alpha enrich` first)
+alpha inspect FILE.gpx        # tracks, guessed kind and elevation source, data-quality warnings
+alpha analyse FILE.gpx        # analysis without storing; --json for the full report
+alpha import a.gpx b.gpx      # store; importing the same bytes again does nothing
+alpha list                    # ID, kind (? = guessed), date, distance, ascent, moving time, DEM
+alpha show 3 [--json]         # analysis of a stored track
+alpha edit 1 --kind planned   # correct a guess (also --elevation-source)
 alpha delete 2                # shows what would be deleted; add --yes to delete
 ```
 
-### DEM enrichment (optional)
+Analysis options (`--profile-bin-m`, `--ascent-threshold-m`,
+`--moving-min-speed-m-s`, …) change the assumptions. Every result states
+the algorithm version and a hash of the options used, and results are
+comparable only when both match.
 
-The elevation check compares your recorded elevation with a terrain
-model: offset, spread, **drift** (warning `ELEVATION_DRIFT`), ascent from
-both, and **terrain slope** (steepness of the ground around the track in
-10° bands; not the track gradient and not a hazard rating).
-
-`alpha enrich ID` needs an OpenTopography API key: copy `.env.example` to
-`.env` and fill in `OPENTOPOGRAPHY_API_KEY`. Only fixed 0.25° tiles are
-requested (never your track); they are cached in `data/local/dem/`, and
-`--offline` never downloads. Copernicus DEM attribution is printed with
-every result (ADR-012). `alpha list` shows which tracks have DEM
-elevation. With the key in `.env`, `alpha serve` also lets the page add
-DEM elevation (after a confirmation); without it, the page uses only
-what is already stored.
-
-**Bavaria DGM1 (1 m terrain model, no trees):** on
-geodaten.bayern.de/opengeodata select a region for DGM1 and save the
-metalink (`.meta4`) in `data/local/`, then:
+### Compare a plan with what you did
 
 ``` bash
-alpha get-tiles data/local/dgm1.meta4 --for-tracks   # plan only: what, how many, privacy
-alpha get-tiles data/local/dgm1.meta4 --for-tracks --yes
-alpha enrich --all --dataset BY_DGM1      # reads local tiles; nothing is sent
-alpha show 3 --elevation dem:BY_DGM1
+alpha edit 3 --planned-track 1   # activity 3 followed plan 1
+alpha compare 1 3 [--json]       # 3 against 1: metrics, gradient bands, steepest climbs
 ```
 
-Without `--for-tracks` all tiles of the region are downloaded (can be
-several GB). With it, only tiles under your stored tracks, but the server
-then learns which 1 km squares they cross. Tiles you place in
+### Estimate durations
+
+``` bash
+alpha scenarios 1 --break-min 30                                 # DIN 33466 standard hiker
+alpha scenarios 1 --horizontal-speed-km-h 5 --ascent-rate-m-h 500  # your own speeds
+alpha edit 2 --effort hard        # your judgement; personal speeds use normal efforts
+alpha baseline                    # personal speeds fitted from your hikes
+alpha scenarios 1 --personal --break-min 30   # estimate with your fitted speeds
+```
+
+`alpha baseline` fits:
+-   one speed factor once you have 5 different routes;
+-   separate flat and climbing speeds once you have 8 routes that differ
+    in steepness.
+
+Until then it says "not enough data" instead of guessing.
+`--personal` fails rather than silently falling back to the standard
+speeds.
+
+### Terrain models (optional)
+
+Your recorded elevation can be compared with a terrain model. ALPHA
+reports the offset, the drift of a barometer, ascent from both series,
+and how steep the ground around the path is.
+
+**Copernicus GLO-30** (worldwide, 30 m, includes treetops) needs a free
+OpenTopography API key. Copy `.env.example` to `.env` and fill in
+`OPENTOPOGRAPHY_API_KEY`. Then:
+
+``` bash
+alpha enrich 3                 # download (fixed 0.25° tiles, never your track), sample, compare
+alpha enrich --all             # every track without terrain data yet
+alpha enrich 3 --offline       # never downloads; uses what is stored or cached
+alpha show 3 --elevation dem:COP30   # any analysis on the terrain-model elevation instead
+```
+
+**Bavaria DGM1** (1 m, bare ground: the better reference in forest). On
+geodaten.bayern.de/opengeodata select a region for DGM1 and save the
+metalink (`.meta4`) in `data/local/`. Then:
+
+``` bash
+alpha get-tiles data/local/dgm1.meta4 --for-tracks        # plan: how many tiles, what the server learns
+alpha get-tiles data/local/dgm1.meta4 --for-tracks --yes  # download
+alpha enrich --all --dataset BY_DGM1                      # reads local tiles; nothing is sent
+```
+
+Without `--for-tracks` the whole region is downloaded, which can be
+several GB. With it, only the tiles under your tracks are downloaded,
+but the server learns which 1 km squares they cross. Tiles placed in
 `data/local/dem/BY_DGM1/` by hand work too.
 
-Data: Bayerische Vermessungsverwaltung – www.geodaten.bayern.de,
-CC BY 4.0 (ADR-013).
+Attribution is printed with every result. For Copernicus: © DLR e.V. and
+© Airbus Defence and Space GmbH, provided under COPERNICUS by the EU and
+ESA. For DGM1: Bayerische Vermessungsverwaltung – www.geodaten.bayern.de,
+CC BY 4.0.
 
-### Local web page and API
+### Explanations in plain language
 
 ``` bash
-alpha serve                   # http://127.0.0.1:8000  (page at /, API docs at /docs)
-alpha serve --llm-model llama3.1:8b   # model for "Reword with local model" on the page
+alpha explain scenarios 1 --personal   # templates: instant, exact, no model needed
+alpha explain elevation 3 --dataset BY_DGM1
+alpha explain baseline
+alpha explain comparison 1 3           # track 3 against track 1
+alpha explain baseline --llm           # reworded by a local model; every number checked
 ```
 
-The page imports files, lists tracks, draws the elevation and gradient
-profile, edits and links tracks, compares two tracks, and shows duration
-scenarios. It works offline and loads nothing from the internet. The API
-has no authentication, so keep it on `127.0.0.1` (ADR-011).
+`--llm` needs [Ollama](https://ollama.com) running on this computer
+(free; nothing leaves the machine):
 
-Every result states the algorithm version and a hash of the parameters
-used; results are comparable only when both match. Metric definitions
-are in [DATA_MODEL.md](DATA_MODEL.md) §5 and the reasoning behind the
-defaults in `docs/adr/`.
+``` bash
+ollama pull llama3.1:8b    # about 5 GB; ALPHA's default model
+```
+
+A model answer is shown only if:
+-   every number and duration matches ALPHA's report, with the right
+    unit and next to the right words;
+-   nothing is left out;
+-   it avoids what ALPHA does not judge: safety, conditions, advice,
+    certainty, links.
+
+Otherwise you get the template text and the reason. `--language` is
+English or German, the languages the checks understand.
+
+On an RTX 3050 an explanation takes about 15–30 s. If Ollama's GPU
+backend fails, ALPHA retries on the CPU (slower) and says so; updating
+the graphics driver usually fixes this.
+
+`python scripts/eval_explain.py --templates --attacks` measures the
+checker against a catalogue of adversarial answers on your reports.
+`--live` runs your model on all of them and through prompt-injection
+probes.
+
+### The local page and API
+
+``` bash
+alpha serve                          # http://127.0.0.1:8000; API docs at /docs
+alpha serve --llm-model llama3.1:8b  # model behind "Reword with local model"
+```
+
+The page can:
+-   import files, list and edit tracks, and link a hike to its plan;
+-   draw the elevation and gradient profile;
+-   compare two tracks;
+-   estimate durations with standard or personal speeds;
+-   show the terrain-model check, adding terrain data after a
+    confirmation;
+-   explain results, including a comparison.
+
+It loads nothing from the internet. The API has no authentication, so
+keep it on `127.0.0.1`.
+
+## Development
+
+``` bash
+python -m ruff check .
+python -m ruff format --check .
+python -m mypy
+python -m pytest
+```
+
+All four must pass; `.github/workflows/tests.yml` runs them on every
+push. `tests/test_architecture.py` enforces the package
+rules in [ARCHITECTURE.md](ARCHITECTURE.md). Tests never use the network.
+Tests on your personal files run only when those files exist in
+`data/local/`.
 
 If an intended change alters results, bump `ALGORITHM_VERSION` and
-refresh the golden outputs with `pytest tests/regression --update-golden`.
+refresh the golden outputs with
+`python -m pytest tests/regression --update-golden`. They live in
+`data/local/golden/`, so they are not in Git; check their diff before
+you continue.
 
-`python scripts/explore.py [file.gpx]` runs the old exploration script
-(plotting sandbox; its numbers are not authoritative).
+`python scripts/explore.py [file.gpx]` is the old exploration script, a
+plotting sandbox whose numbers are not authoritative.
+
+### Documentation site
+
+The Markdown files in the repository root and `docs/adr/` are published
+as a site on GitHub Pages. The files stay the single source; a script
+collects them and rewrites their links.
+
+``` bash
+pip install -e ".[docs]"
+python scripts/build_site_docs.py && mkdocs serve           # preview at http://127.0.0.1:8000
+python scripts/build_site_docs.py && mkdocs build --strict  # fails on broken links
+```
+
+`.github/workflows/docs.yml` builds and deploys the site on every push
+to `master` that changes the documentation. One-time setup: repository
+**Settings → Pages → Source: GitHub Actions**.
+
+The documentation names no personal hikes or places. Reference
+activities are "Activity A–G" and "Plan 1–2". Tests find the real files
+through `data/local/references.json` (git-ignored; format in
+`data/references.example.json`).
 
 ## Data
 
--   `data/samples/`: shareable GPX (synthetic or planned routes).
--   `data/local/`: personal activities and the local database;
-    git-ignored. Never commit recorded activities.
--   `.gitignore` ignores every `*.gpx` outside `data/samples/` and
-    `tests/fixtures/`, so a new export dropped anywhere else stays
-    private.
-
-## First milestone
-
-1.  Read one GPX file (tracks and routes) into a typed `Track`.
-2.  Report data-quality warnings.
-3.  Calculate distance, ascent/descent, profile-bin gradient, climb
-    sections, and activity time metrics.
-4.  Return a versioned `Analysis`.
-5.  Test against small hand-checked fixtures and golden outputs for the
-    reference files.
+-   **No real GPX file is shared.** Planned routes and activities, the
+    database, terrain tiles, and the golden outputs derived from them all
+    live in `data/local/`, which is git-ignored.
+-   The only committed GPX files are the small synthetic fixtures in
+    `tests/fixtures/`. `.gitignore` ignores every other `*.gpx`, so an
+    export dropped anywhere in the repository stays private.
+-   On a fresh clone the tests that need your files are skipped; the
+    synthetic fixtures cover the same code.
 
 ## Safety boundary
 
-ALPHA is an experimental analysis tool, not a navigation system, guide,
-avalanche forecast, weather service, or safety certification. It never
+ALPHA is an experimental analysis tool. It is not a navigation system,
+guide, avalanche or weather service, or safety certification. It never
 says a route is safe or recommends going. Use current official
 forecasts, avalanche bulletins, route reports, maps, and qualified local
 advice.

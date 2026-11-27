@@ -3,7 +3,7 @@ elevation (DATA_MODEL.md §5.7, ADR-012).
 
 The reference is typically a DEM, but nothing here depends on where it came
 from. A raster must not be sampled at every 1 Hz GPS point: lateral position
-jitter on a slope turns into vertical noise (Nebelhorn_push: 1862 m DEM gain
+jitter on a slope turns into vertical noise (reference activity A: 1862 m DEM gain
 at 1 Hz vs ~1440 m at 20 m spacing). So the reference is sampled at *knots*
 roughly ``spacing_m`` apart along the track and interpolated linearly along
 the track in between. Differences are ``recorded - reference``. Neither series

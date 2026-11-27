@@ -1,356 +1,333 @@
-# ALPHA --- Architecture and Engineering Design
+# ALPHA --- Architecture
 
-## 1. Architectural style
+## 1. Style and rules
 
-A **modular monolith**: one Python package, one process. Domain logic is
-independent of frameworks, databases, and file formats.
+A **modular monolith**: one Python package (`src/alpha/`), one process,
+no background workers (ADR-001, ADR-011). Domain logic is independent of
+frameworks, databases, file formats, and the network. Packages are added
+when a phase needs them, never ahead of time.
 
-Layers are introduced **when they are needed**, not up front. The
-dependency rule applies from day one; empty folders and interfaces do
-not.
+### Packages and what they may import
 
-### Dependency direction
+| Package | Role | May import | Enforced |
+|---|---|---|---|
+| `domain` | Types and pure calculations: analysis, comparison, scenario formulas, reference elevation, terrain slope | stdlib, NumPy, pyproj | ✅ |
+| `gpx` | GPX bytes → `Track` and read warnings | gpxpy (only here) | ✅ |
+| `persistence` | SQLite schema, repository, file store | SQLAlchemy (only here) | ✅ |
+| `dem` | Elevation models: datasets, tiles, OpenTopography download, local GeoTIFF tiles, metalinks, sampling | rasterio (only here), network | ✅ |
+| `modelling` | Pure fitting of personal speeds from samples | stdlib, NumPy, `domain` | ✅ |
+| `application` | Use cases: coordinate domain, adapters, and storage; own transactions | everything above; never `cli`, `api`, `report` | ✅ |
+| `report` | The only place JSON reports are built | `application` and below, `explain` | — |
+| `explain` | Facts, template explanations, validation of model text | stdlib only | ✅ |
+| `llm` | Local language model (Ollama on a loopback address) | network (stdlib `urllib`) | ✅ |
+| `cli` | Argument parsing and plain-text rendering; reads `.env` | everything | — |
+| `api` | FastAPI routes and Pydantic schemas mirroring `report` | FastAPI, Pydantic, Starlette, uvicorn (only here) | ✅ |
 
--   `domain`: core types (DATA_MODEL.md §4, §6, §7) and pure
-    calculations. Imports only the standard library, NumPy, and pyproj
-    (pure geodesic math, no I/O).
--   `gpx`: adapter that turns GPX bytes into domain `Track` objects and
-    import warnings. The only module that imports `gpxpy`.
--   `persistence`: SQLite schema, repository, and file store. The only
-    package that imports SQLAlchemy.
--   `application`: use cases that coordinate domain, the GPX adapter, and
-    persistence; each owns its transaction.
--   `report`: JSON report format (output boundary).
--   `cli` now, `api` later: thin entry points that call use cases and
-    render results.
+"Enforced" means `tests/test_architecture.py` fails when the rule is
+broken. Network libraries are allowed only in `dem` and `llm`. Neither
+`gpx` nor `persistence` imports `application`, `cli`, or `report`.
 
-Dependencies point inward: `cli/api → application → domain`;
-`gpx/persistence → domain`. Domain never imports adapters.
-`tests/test_architecture.py` enforces: domain imports only stdlib,
-NumPy, pyproj; gpxpy only in `gpx`; SQLAlchemy only in `persistence`;
-`persistence` and `gpx` never import `application`, `cli`, or `report`;
-`application` never imports `cli`.
+Entry points contain no calculations or SQL: `cli/render.py` only
+formats; API route handlers only translate HTTP to use cases.
 
-## 2. Component diagram
+## 2. Components
 
 ``` mermaid
 flowchart TD
-    CLI["CLI (Phase 1+)"] --> App["Application use cases (Phase 3+)"]
-    API["FastAPI (Phase 5)"] --> App
-    App --> Domain["Domain: Track, Analysis, Comparison, Scenario"]
-    App --> GPX["gpx adapter (gpxpy)"]
+    CLI["cli"] --> App["application (use cases)"]
+    API["api + local page"] --> App
+    CLI --> Report["report (JSON)"]
+    API --> Report
+    Report --> Explain["explain (facts, templates, validator)"]
+    CLI --> LLM["llm (local Ollama)"]
+    API --> LLM
+    App --> Domain["domain"]
+    App --> Modelling["modelling (fitting)"]
+    App --> GPX["gpx (gpxpy)"]
     App --> Repo["persistence (SQLite)"]
+    App --> DEM["dem (rasterio, tiles)"]
+    Modelling --> Domain
     GPX --> Domain
     Repo --> Domain
-    Repo --> DB[("SQLite")]
-    App --> Files["data/local/ originals"]
-    App -. post-MVP .-> DEM["DEM provider"]
-    App -. post-MVP .-> ML["Performance model"]
-    App -. post-MVP .-> LLM["Explanation provider"]
+    Repo --> DB[("alpha.db")]
+    App --> Files["files/<sha256>.gpx"]
+    DEM --> Tiles["dem/<dataset>/ tiles"]
+    DEM -. opt-in .-> OT["OpenTopography / bayernwolke.de"]
+    LLM -. opt-in, loopback .-> Ollama["Ollama on this computer"]
 ```
 
-`alpha inspect` and `alpha analyse FILE` still call the GPX adapter and
-domain directly (nothing is stored); every stored-track command goes
+`alpha inspect` and `alpha analyse FILE` call the GPX adapter and the
+domain directly (nothing is stored). Every stored-track command goes
 through `application`.
 
-## 3. Source tree by phase
-
-### Current (MVP, Phases 1--5, Phase 6 in progress)
+## 3. Source tree
 
 ``` text
 gpx_model/
 ├── pyproject.toml
 ├── src/alpha/
 │   ├── domain/
-│   │   ├── track.py          # Track and its enums
-│   │   ├── classify.py       # kind / elevation-source heuristics
-│   │   ├── geodesy.py        # step distances, jitter filter
-│   │   ├── elevation.py      # hysteresis ascent/descent
-│   │   ├── profile.py        # resampling, profile bins, gradient
-│   │   ├── timing.py         # elapsed/moving/stopped/gaps
-│   │   ├── climbs.py         # climb sections
-│   │   ├── quality.py        # warning detection
-│   │   ├── analysis.py       # AnalysisParams, analyse(track, params)
-│   │   ├── comparison.py     # compare(a, b) -> ComparisonResult
-│   │   ├── scenarios.py      # method registry, din33466, assumptions
-│   │   ├── reference_elevation.py # DEM knots, interpolation, comparison,
-│   │   │                     # drift (ADR-014)
-│   │   └── terrain.py        # terrain slope from DEM probes (ADR-015)
-│   ├── gpx/
-│   │   └── reader.py         # bytes -> tracks + warnings
+│   │   ├── track.py               # Track, TrackKind, ElevationSource, Inference, Effort
+│   │   ├── classify.py            # kind / elevation-source heuristics
+│   │   ├── quality.py             # QualityParams, warnings, check_track
+│   │   ├── geodesy.py             # step distances, jitter filter
+│   │   ├── elevation.py           # hysteresis ascent/descent
+│   │   ├── profile.py             # profile bins, gradient, distribution
+│   │   ├── timing.py              # elapsed / moving / stopped / gaps
+│   │   ├── climbs.py              # climb sections
+│   │   ├── analysis.py            # AnalysisParams, analyse(), ALGORITHM_VERSION
+│   │   ├── comparison.py          # compare(a, b) -> ComparisonResult
+│   │   ├── scenarios.py           # method registry, din33466, assumptions
+│   │   ├── reference_elevation.py # DEM knots, comparison, drift
+│   │   └── terrain.py             # terrain slope from DEM probes
+│   ├── gpx/reader.py              # bytes -> tracks + warnings
 │   ├── persistence/
-│   │   ├── schema.py         # SQLAlchemy tables (schema version)
-│   │   ├── repository.py     # Database, Repository, records
-│   │   └── files.py          # FileStore: files/<sha256>.gpx
+│   │   ├── schema.py              # tables, SCHEMA_VERSION, additive upgrades
+│   │   ├── repository.py          # Database, Repository, records
+│   │   └── files.py               # FileStore: files/<sha256>.gpx
+│   ├── dem/
+│   │   ├── datasets.py            # COP30, BY_DGM1 with attribution
+│   │   ├── tiles.py               # fixed 0.25° grid, tile assignment
+│   │   ├── opentopography.py      # download (API key never logged)
+│   │   ├── provider.py            # cached-tile sampler, ElevationSampler
+│   │   ├── local.py               # local GeoTIFF tiles, footprint index
+│   │   ├── metalink.py            # metalink parsing and tile download
+│   │   └── sampling.py            # bilinear sampling
+│   ├── modelling/
+│   │   ├── baseline.py            # model 1: speed multiplier; effort helpers
+│   │   └── split.py               # model 2: flat and vertical factors
 │   ├── application/
-│   │   ├── tracks.py         # Workspace; import/list/show/compare/edit/delete
-│   │   ├── scenarios.py      # estimate_duration + observed times
-│   │   ├── elevation.py      # enrich_track, elevation_check (DEM)
-│   │   └── baseline.py       # personal_baseline: samples -> modelling
-│   ├── explain/              # Phase 8: facts, templates, validator (pure, ADR-020)
-│   ├── llm/                  # Phase 8: local Ollama adapter (loopback only)
-│   ├── modelling/            # Phase 7: pure fitting on samples; imports only
-│   │   │                     # numpy + domain (ADR-005)
-│   │   ├── baseline.py       # model 1: one speed multiplier (ADR-016)
-│   │   └── split.py          # model 2: flat and vertical factors (ADR-017)
-│   ├── dem/                  # DEM adapter: datasets, 0.25° tiles, cache,
-│   │                         # OpenTopography client, local GeoTIFF tiles
-│   │                         # (local.py), metalink downloads (metalink.py),
-│   │                         # bilinear sampling, open_dem()
-│   ├── report.py             # JSON reports (shared by CLI and API)
+│   │   ├── tracks.py              # Workspace; import/list/show/compare/edit/delete
+│   │   ├── scenarios.py           # estimate_duration, estimate_personal
+│   │   ├── elevation.py           # enrich_track, elevation_check, get_tiles
+│   │   ├── baseline.py            # personal_baseline, personal_assumptions
+│   │   └── profiles.py            # local profiles: folders, synthetic flag (ADR-021)
+│   ├── report.py                  # every JSON report (shared by CLI and API)
+│   ├── explain/
+│   │   ├── facts.py               # Fact, FactSet
+│   │   ├── templates.py           # scenarios / elevation / baseline templates
+│   │   ├── validate.py            # numbers, citations, completeness, topics
+│   │   └── explain.py             # template -> optional model -> validation
+│   ├── llm/ollama.py              # OllamaRewriter (loopback only, CPU retry)
 │   ├── cli/
-│   │   ├── app.py            # argument parsing, commands, exit codes
-│   │   ├── render.py         # plain-text output
-│   │   └── config.py         # .env / environment (API key; never printed)
+│   │   ├── app.py                 # commands and exit codes
+│   │   ├── render.py              # plain-text output
+│   │   └── config.py              # .env / environment (API key; never printed)
 │   └── api/
-│       ├── app.py            # FastAPI routes, error handlers, request log
-│       ├── schemas.py        # Pydantic response/request models
-│       ├── server.py         # uvicorn runner (`alpha serve`)
-│       └── static/index.html # local page: plain JS + inline SVG
+│       ├── app.py                 # create_app: context, handlers, routers
+│       ├── context.py             # ApiContext (profile, workspace, DEM, model) + dependencies
+│       ├── errors.py              # ApiError, exception -> status mapping
+│       ├── request_log.py         # one privacy-preserving log line per request
+│       ├── reports.py             # use case -> report, shared by routes
+│       ├── routers/               # meta, tracks, analysis, elevation, explanations
+│       ├── schemas.py             # Pydantic models (extra="forbid")
+│       ├── server.py              # uvicorn runner (alpha serve)
+│       └── static/index.html      # local page: plain JS + inline SVG
 ├── tests/
-│   ├── fixtures/             # small synthetic GPX, committed
-│   ├── unit/                 # domain only, no database
-│   ├── integration/          # reader, persistence, application, CLI, API
-│   └── regression/           # golden outputs, exit-criterion checks
+│   ├── fixtures/                  # small synthetic GPX
+│   ├── unit/                      # domain and modelling, no database
+│   ├── integration/               # reader, persistence, use cases, DEM, CLI, API, explain
+│   ├── regression/                # golden outputs, reference-file checks
+│   └── test_architecture.py       # import rules (§1)
 ├── scripts/
-│   └── explore.py            # former main.py; pandas/plotly allowed here
+│   ├── explore.py                 # old exploration sandbox; pandas/plotly allowed here
+│   ├── eval_explain.py            # validator and local-model evaluation (ADR-020)
+│   ├── simulate_baseline.py       # simulation study of the speed models (ADR-021)
+│   ├── synthetic_hikes.py         # synthetic GPX hikes with a known pace (ADR-021)
+│   └── build_site_docs.py         # collects the docs for the site (mkdocs.yml)
+├── mkdocs.yml                     # documentation site; deployed by .github/workflows/docs.yml
 ├── data/
-│   ├── samples/              # committed, shareable GPX (planned routes)
-│   └── local/                # git-ignored; personal GPX, alpha.db, files/, golden/
-└── docs/adr/
+│   └── local/                     # git-ignored: all real GPX, alpha.db, files/, dem/, golden/,
+│                                  #   profiles/<name>/ (other profiles), synthetic/ (generated GPX)
+└── docs/adr/                      # decision records (index: docs/adr/README.md)
 ```
-
-### Planned
-
-Further Phase 7 models (three DIN speeds, pace per gradient band) are
-added to `alpha.modelling` (ADR-016).
 
 ## 4. Key design decisions
 
-### 4.1 Column-oriented track
-
-`Track` holds NumPy arrays (`lat_deg`, `lon_deg`, `ele_raw_m`,
-`time_utc_s`, `source_segment`), not one object per point. A long
-activity has 25k points at 1 Hz; vectorised step calculations stay fast
-and deterministic. pandas is used only in `scripts/`.
-
-### 4.2 Distances and boundaries
-
-Step distances use a geodesic on the WGS84 ellipsoid (`pyproj.Geod`).
-Every per-step calculation is masked at source-segment boundaries so a
-recording gap is never counted as distance.
-
-### 4.3 Windows in metres and seconds
-
-All smoothing, resampling, and detection windows are expressed in
-metres or seconds. Point spacing ranges from 0.6 m (Strava, 1 Hz) to
-15 m (mapy.com planner), so point-count windows would give different
-results for the same terrain.
-
-### 4.4 Versioned, parameterised analysis
-
-`analyse(track, params) -> Analysis` is a pure function. Each result
-records `algorithm_version` and `params_hash`. Bump the version when a
-calculation changes in a way that alters outputs; regression tests on
-the reference files make such changes visible.
-
-### 4.5 Scenario methods as strategies
-
-A **method** is a pure formula registered by name in
-`domain.scenarios.SCENARIO_METHODS` (`din33466` first). **Assumptions**
-are inputs that record their source: `user`, `preset`, or `fitted`. A
-personal model therefore usually supplies assumptions to an existing
-method rather than replacing it. Fitting and any ML live in a separate
-`alpha.modelling` package (Phase 7) that depends on the domain, never the
-other way round (ADR-005). It is pure: `alpha.application.baseline`
-collects samples from storage and passes them in (ADR-016). No class
-hierarchy is needed.
-
-### 4.6 Reading GPX
-
-Read files as **bytes** (`"rb"`). The XML declaration decides the
-encoding; text-mode reading on Windows defaults to cp1252 and breaks on
-non-ASCII names such as Cyrillic route titles. The same bytes are
-hashed (SHA-256) for idempotent import. Both `<trk>` and `<rte>` are
-read; waypoints are kept as named points for later display.
-
-## 5. Patterns
-
-Use patterns only where they solve a present problem.
-
-| Pattern | Where | When |
+| Decision | Why | ADR |
 |---|---|---|
-| Adapter | `gpx/`, later DEM/LLM | Now |
-| Strategy (function registry) | Scenario methods | Phase 4 |
-| Repository | `persistence/` | Phase 3 |
-| Dependency injection (constructor args) | Use cases | Phase 3 |
-| DTO (Pydantic) | API boundary only | Phase 5 |
+| **Column-oriented `Track`** (NumPy arrays, not point objects) | 25k points per long activity; vectorised, deterministic | 008 |
+| **Geodesic steps masked at source-segment boundaries** | A recording gap is never distance | 010 |
+| **Windows in metres or seconds**, never point counts | Point spacing ranges from 0.6 m (1 Hz) to 15 m (planner) | 007, 009 |
+| **Versioned, parameterised analysis** (`algorithm_version`, `params_hash`) | Results are comparable only with the same calculation and options | 002 |
+| **Read GPX as bytes**; the XML declaration decides the encoding | Text mode breaks non-ASCII names on Windows; the same bytes are hashed | — |
+| **Scenario methods vs assumptions**: formulas in a registry; assumptions carry `user` / `preset` / `fitted` | A personal model supplies assumptions to the same formula | 005 |
+| **Elevation series as a parameter** (`recorded` or `dem:<dataset>`) | Never a silent fallback; DEM values always carry attribution | 012 |
+| **Fitting outside the domain**, as pure functions on samples | Testable with synthetic data; the domain stays model-free | 016 |
+| **Templates first; a model may only reword**, validated against facts | No calculation, no invention, free and local | 020 |
 
-Not planned for the MVP: Unit of Work beyond a SQLAlchemy session,
-Specification, Factory, abstract base classes for single
-implementations.
+Patterns are used only where they solve a present problem:
+-   adapters (`gpx`, `persistence`, `dem`, `llm`);
+-   a function registry for scenario methods;
+-   a repository;
+-   constructor arguments for dependencies;
+-   Pydantic DTOs only at the API boundary;
+-   a `Protocol` where two implementations exist (`ElevationSampler`).
 
-## 6. Use-case flows
+There are no abstract base classes with a single implementation.
 
-Implemented in `alpha.application.tracks` (ADR-002).
+## 5. Use-case flows
 
-### Import
+All in `alpha.application`; each use case owns its transaction.
 
-1.  Compute SHA-256 of the bytes; if it exists, return the existing
-    record (no-op).
-2.  `gpx.reader` parses (size limit 50 MB). Unreadable files raise
-    before anything is written.
-3.  Copy the original to `<data dir>/files/<sha256>.gpx`.
-4.  One transaction: source file, tracks with inferred kind/elevation
-    source, points, and the default analysis. On failure the new copy is
-    removed.
+-   **Import:**
+    1.  SHA-256 of the bytes; an existing file is a no-op.
+    2.  Parse; reject before writing anything.
+    3.  Store the original.
+    4.  In one transaction: source file, tracks, points, and the default
+        analysis. On failure the new copy is removed.
+-   **Show, list, compare:** look up the cached analysis for
+    `(track, algorithm_version, params_hash)`, otherwise analyse and cache.
+    With `elevation=dem:<id>` the stored DEM series replaces the recorded
+    one for that analysis (an error if it is not stored). Comparisons
+    analyse both tracks with the same options and are not stored.
+-   **Edit:** user corrections are stored with `inferred_by = user`;
+    links are validated (activity → planned route). Effort goes to
+    `track_annotations`. Cached analyses are dropped on a kind or
+    elevation-source change.
+-   **Scenarios:**
+    1.  Analysis plus assumptions go into the registered method, once
+        per speed multiplier.
+    2.  Observed times are added: the track's own, and those of linked
+        activities.
+    3.  `estimate_personal` first fits the baseline with the same
+        analysis options and fails when nothing is fitted.
+-   **Enrich:**
+    1.  Sample the dataset at 20 m knots, plus terrain-slope probes, in
+        one pass over the tiles.
+    2.  Store the profile and slope.
+    3.  Drop cached analyses.
+    4.  Compare with the recorded elevation.
 
-### Show / list
+    Tiles come from the cache, or are downloaded only on request.
+-   **Baseline:**
+    1.  Collect one sample per eligible activity; exclusions carry a
+        reason.
+    2.  Pass the samples to `alpha.modelling`.
+    3.  Compare activities outside the effort selection with the fit.
+-   **Explain:**
+    1.  The entry point builds the same JSON report as `--json`.
+    2.  `alpha.explain` builds facts and the template; with `--llm`, it
+        asks the local model and validates the answer.
 
-1.  Load the track; look up the analysis for `(track, ALGORITHM_VERSION,
-    params_hash)`.
-2.  If missing, call `analyse` and cache it.
+## 6. Technology
 
-### Compare
+| In use | Where |
+|---|---|
+| Python 3.12+, `pyproject.toml` | everywhere |
+| NumPy, pyproj | domain, modelling, dem |
+| gpxpy | `gpx` only |
+| SQLAlchemy 2 + SQLite | `persistence` only |
+| rasterio (GDAL) | `dem` only |
+| FastAPI, Pydantic v2, uvicorn | `api` only |
+| Ollama (external program, HTTP on loopback; no Python dependency) | `llm`, opt-in |
+| pytest, Ruff, mypy (strict) | development |
+| pandas, plotly | `scripts/` only |
 
-1.  Analyse both tracks with the same params (cached or computed).
-2.  `domain.comparison.compare` builds the `ComparisonResult`. Not
-    persisted.
+Considered only with a measured need: scikit-learn (inside `modelling`,
+if transparent models stop being enough), PostGIS, and a map UI
+(Phase 9).
 
-### Edit / delete
-
--   Edit stores user corrections (`inferred_by = user`), validates links
-    (activity → planned route), and drops cached analyses on kind or
-    elevation-source changes.
--   Delete removes a whole source file with its tracks and the stored
-    copy, only when confirmed.
-
-### Scenarios
-
-1.  Load the cached (or compute the) analysis; validated assumptions
-    come from the caller (preset or user).
-2.  Apply the registered method once per speed multiplier; result with
-    breakdown and notes.
-3.  Add observed times: the track's own if it is an activity, and those
-    of every activity linked to it, each with its implied speed
-    multiplier. Not persisted (ADR-005).
-
-## 7. Technology
-
-### MVP
-
--   Python 3.12+, `pyproject.toml`, virtual environment
--   gpxpy, NumPy, pyproj
--   SQLAlchemy 2.x + SQLite (ADR-002)
--   rasterio (GDAL) for reading DEM tiles, only in `alpha.dem` (ADR-012)
--   FastAPI + Pydantic v2 (Phase 5)
--   pytest, Ruff, mypy or pyright
--   pandas, plotly: exploration scripts only
-
-### Later
-
--   PostGIS if spatial queries appear
--   scikit-learn for personal performance baselines, only inside
-    `alpha.modelling` (ADR-005)
--   React + MapLibre UI
--   LLM provider behind an adapter, opt-in
-
-## 8. HTTP API (ADR-011)
+## 7. HTTP API (ADR-011)
 
 `alpha serve` (default `127.0.0.1:8000`) serves the API, OpenAPI docs at
 `/docs`, and the local page at `/`.
 
 | Method and path | Purpose |
 |---|---|
-| `GET /health` | Liveness and version |
-| `POST /files?filename=` | Import GPX sent as raw body (201 new / 200 already imported) |
-| `GET /tracks` | Stored tracks with summaries |
-| `GET /tracks/{id}` | Full analysis; analysis params as query parameters |
-| `PATCH /tracks/{id}` | `{kind, elevation_source, planned_track_id, clear_planned_track}` |
+| `GET /health` | Liveness, version, active profile, whether it is synthetic |
+| `GET /profiles` | Local profiles (names and synthetic flag only) |
+| `PUT /profile` | Switch the active profile: `{"name": "dev"}` (create profiles with the CLI) |
+| `POST /files?filename=` | Import GPX sent as the raw body (201 new / 200 already imported) |
+| `GET /tracks` | Stored tracks with summaries and `dem_datasets` |
+| `GET /tracks/{id}` | Full analysis; analysis options as query parameters |
+| `PATCH /tracks/{id}` | `kind`, `elevation_source`, `planned_track_id`, `clear_planned_track`, `effort`, `clear_effort` |
 | `DELETE /tracks/{id}/source-file[?dry_run=true]` | Delete the source file and its tracks |
 | `GET /comparisons?a=&b=` | Compare b against a |
-| `GET /tracks/{id}/scenarios` | DIN 33466 range + observed times; `assumptions=personal` for fitted speeds |
-| `GET /baseline` | Personal speed models (ADR-016 to ADR-019) |
-| `GET /tracks/{id}/explanation?topic=` | Plain-language explanation; `llm=true` rewords locally (ADR-020) |
-| `GET /baseline/explanation` | The same for the personal speeds |
-| `GET /dem/datasets` | DEM datasets, `downloads_available` |
-| `POST /tracks/{id}/dem` | Enrich with DEM elevation (downloads missing tiles only) |
+| `GET /tracks/{id}/scenarios` | Duration range and observed times; `assumptions=personal` for fitted speeds |
+| `GET /baseline` | Personal speed models |
+| `GET /dem/datasets` | DEM datasets and whether downloads are available |
+| `POST /tracks/{id}/dem` | Sample, store, and compare DEM elevation (downloads missing tiles only) |
 | `GET /tracks/{id}/dem/{dataset}` | Elevation check from the stored profile (no network) |
+| `GET /tracks/{id}/explanation?topic=scenarios\|elevation` | Plain-language explanation; `llm=true` rewords locally |
+| `GET /baseline/explanation` | The same for the personal speeds |
+| `GET /comparisons/explanation?a=&b=` | The same for a comparison of b against a |
 
-Scenario query parameters:
+-   **Analysis options:** `profile_bin_m`, `ascent_threshold_m`,
+    `distance_min_step_m`, `moving_min_speed_m_s`, `moving_window_s`,
+    `climb_min_gradient_percent`, and `elevation=recorded|dem:<dataset>`.
+-   **Scenario options:** `horizontal_speed_km_h`, `ascent_rate_m_h`,
+    `descent_rate_m_h`, `break_min`, `delay_min`, repeatable
+    `speed_multiplier`, `assumptions`, and `effort`.
+-   **Errors:** always `{"error": {"code", "message", "details?"}}`:
 
--   `horizontal_speed_km_h`, `ascent_rate_m_h`, `descent_rate_m_h` (empty
-    = DIN 33466 standard preset);
--   `break_min`, `delay_min`;
--   `speed_multiplier` (repeatable).
+| Status | Codes |
+|---|---|
+| 404 | `TRACK_NOT_FOUND`, `PROFILE_NOT_FOUND` |
+| 409 | `INVALID_EDIT`, `DEM_PROFILE_MISSING`, `BASELINE_NOT_FITTED` |
+| 413 | `FILE_TOO_LARGE` |
+| 422 | `INVALID_REQUEST`, `INVALID_PARAMS`, `SCENARIO_INPUT`, GPX read codes |
+| 502 | `DEM_DOWNLOAD_FAILED` |
+| 503 | `DEM_UNAVAILABLE` |
 
-Analysis query parameters include `elevation=recorded|dem:<dataset>`
-(ADR-012). The page has a matching selector.
+The CLI reads the OpenTopography key, the model name, and the profile and
+passes them to `create_app(data_dir, dem_api_key, llm_model, profile)`.
+`alpha.api` never reads the environment.
 
-Errors are always `{"error": {"code", "message", "details?"}}` with
-404 / 409 / 413 / 422 (ADR-011); 409 includes `DEM_PROFILE_MISSING`;
-DEM downloads add 502 `DEM_DOWNLOAD_FAILED` and 503 `DEM_UNAVAILABLE`.
+**Profiles (ADR-021).** `--profile NAME` (or `ALPHA_PROFILE`) selects a
+separate database inside the data directory; `default` is the data
+directory itself. There are no accounts: ALPHA stays single-user and
+local, and a profile only keeps data sets apart. The page switches the
+server's active profile with `PUT /profile`. A synthetic profile is for
+generated test hikes; its fits use them and every output from such a fit
+says so. Personal profiles never fit on generated hikes.
 
-The OpenTopography key is read by the CLI (`alpha serve`) and passed to
-`create_app(data_dir, dem_api_key)`; `alpha.api` never reads the
-environment for it.
+## 8. Reliability and observability
 
-## 9. Reliability and observability
+-   One JSON log line per HTTP request: operation ID, method, path,
+    status, duration. It never contains bodies, query strings, file
+    names, or coordinates.
+-   Import is idempotent by SHA-256; schema upgrades are additive and
+    automatic.
+-   Raw and processed elevation are separate; `ele_raw_m` is never
+    modified.
+-   Golden outputs pin results for the reference files. They live in
+    `data/local/golden/` with the files themselves and are skipped when
+    absent.
+-   Requests take milliseconds and a 25k-point import about 0.6 s, so
+    there are no background workers. A local-model explanation takes
+    15–30 s and runs only on request, one at a time.
 
--   One structured JSON log line per HTTP request (operation ID, method,
-    path, status, duration); never bodies, query strings, file names, or
-    coordinates.
--   Idempotent import by SHA-256.
--   Raw and processed elevation are separate arrays and columns.
--   Regression tests pin outputs for the reference GPX files.
--   Warnings returned whenever source data is incomplete.
--   No background workers: a 25k-point import with analysis takes about
-    0.6 s and requests take milliseconds. Revisit only with a measurement
-    (ADR-011).
+## 9. Security and privacy
 
-## 10. Security and privacy
-
--   Personal activities (Strava exports) live in `data/local/`, which is
-    git-ignored together with `*.db` and `.env`.
--   Committed GPX is limited to synthetic fixtures and planned routes
-    whose export licence allows it.
--   Activity start/end points can reveal home or accommodation; never
-    log or share them by default.
--   External LLM calls (post-MVP) are opt-in and receive computed
-    metrics, not raw coordinates.
+-   Personal activities, the database, tiles, and `.env` live in
+    `data/local/` or are git-ignored. Synthetic hikes generated from
+    personal paths contain real coordinates and stay there too
+    (`data/local/synthetic/`). No real GPX file is committed,
+    including planned routes; only synthetic test fixtures are.
+-   Start and end points can reveal home or accommodation: they are
+    never logged, and coordinates never appear in reports or logs.
+-   **Network access is opt-in and limited to two adapters:**
+    -   `dem`, COP30 (`alpha enrich`, or the page after a confirmation):
+        fixed 0.25° tiles; the track itself is never sent (ADR-012).
+    -   `dem`, DGM1 (`alpha get-tiles --yes`): the region the user chose,
+        or with `--for-tracks` the 1 km squares the tracks cross. The
+        metalink is treated as untrusted: plain file names only, known
+        HTTPS hosts only, every tile verified (ADR-013).
+    -   `llm` (`--llm`, or "Reword" on the page): only an Ollama server
+        on a loopback address; any other host is refused. The model
+        receives facts from the reports, never coordinates or GPX text
+        (ADR-020).
+-   The OpenTopography key comes from the environment or `.env`. It is
+    never printed, logged, stored, or put into error messages.
+-   Model text is shown only after validation; caveats and the safety
+    boundary are fixed text from ALPHA.
+-   The API binds to localhost and has no authentication. The page loads
+    nothing from the internet and inserts server data as text only.
 -   Deleting a source file removes all derived rows and the stored copy.
--   The API binds to localhost by default and has no authentication; the
-    web page loads nothing from the internet and inserts data as text only.
--   Network access, always opt-in, happens only in two adapters:
-    -   `alpha.llm` (`alpha explain --llm`) talks to a **local** Ollama
-        server on a loopback address and refuses any other host
-        (ADR-020);
-    -   DEM download in `alpha.dem`:
-    -   `alpha enrich` (COP30): fixed 0.25° tiles, never the track itself;
-    -   `alpha get-tiles --yes` (DGM1 from a metalink): the region the user
-        chose, or with `--for-tracks` the 1 km squares the tracks cross
-        (ADR-013).
-    The API key comes from the environment or `.env` and is never printed
-    or logged (ADR-012).
--   Document licences and attribution for map and elevation data.
+-   Elevation data carries its licence attribution in every output.
 
-## 11. Architecture decision records
+## 10. Decision records
 
-`docs/adr/NNN-title.md`, one page each:
-
-Written (accepted):
-
--   ADR-001: modular monolith; layers introduced per phase.
--   ADR-002: SQLite, original files by hash, cached analyses, integer IDs.
--   ADR-004: ascent/descent by hysteresis, 3 m for all sources.
--   ADR-007: moving time by 3D windowed speed (rev. 2, Strava-calibrated).
--   ADR-008: column-oriented `Track` with NumPy; pandas outside domain.
--   ADR-009: 50 m profile bins, no clipping, gradient bands, climbs.
--   ADR-005: scenario methods vs assumption sources; ML outside domain.
--   ADR-010: jitter-filtered distance (3 m minimum displacement).
--   ADR-011: HTTP API, error format, logging, local page; no workers.
--   ADR-012: DEM enrichment (COP30 via OpenTopography, tiles, 20 m knots).
-
-Planned:
-
--   ADR-003: GPX (`trk` and `rte`) as the only input format for MVP.
+All decisions with their reasoning and measurements are listed in
+[docs/adr/README.md](docs/adr/README.md).

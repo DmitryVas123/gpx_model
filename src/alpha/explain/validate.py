@@ -21,7 +21,7 @@ from alpha.explain.facts import FactSet
 # whole words. English and German (the user may ask for German).
 FORBIDDEN = re.compile(
     r"\b("
-    r"safe|safely|safety|unsafe|danger\w*|hazard\w*|risk\w*|"
+    r"safe\w*|unsafe|danger\w*|hazard\w*|risk\w*|"
     r"avalanche\w*|weather|forecast\w*|snow\w*|ice|icy|storm\w*|thunder\w*|"
     r"lightning|rain\w*|wind|winds|windy|"
     r"turn back|should (?:not )?(?:go|attempt|continue|start|hike)|"

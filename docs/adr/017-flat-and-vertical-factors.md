@@ -9,7 +9,7 @@
 
 One speed multiplier (ADR-016) predicts the reference activities with a
 leave-one-route-out error of median 17 % and maximum 44 %. The worst case
-is the steepest route (Nebelhorn_push, ×2.38 against ×1.48–1.83 for the
+is the steepest route (Activity A, ×2.38 against ×1.48–1.83 for the
 others). This suggests that this user's climbing speed differs from their
 flat speed by more than DIN's standard ratio assumes.
 
@@ -58,7 +58,7 @@ flat speed by more than DIN's standard ratio assumes.
 
 ## Evidence (four activities, DGM1 elevation, gates lowered for inspection)
 
-Route mix: `v / h` from 1.00 (Wanderung) to 2.34 (Nebelhorn), a range of
+Route mix: `v / h` from 1.00 (Activity D) to 2.34 (Activity A), a range of
 ×2.35, which passes the 1.5 requirement.
 
 | | Model 1: one multiplier | Model 2: flat / vertical |
@@ -68,14 +68,14 @@ Route mix: `v / h` from 1.00 (Wanderung) to 2.34 (Nebelhorn), a range of
 | LOO error, median / max | 17 % / 44 % | **7 % / 10 %** |
 | 95 % interval | average ×1.32–2.50 | flat 0.84–1.70, vertical **0.36–31** |
 
--   Model 2 explains Nebelhorn_push without treating it as an outlier.
+-   Model 2 explains Activity A without treating it as an outlier.
     This user walks flat terrain at about the standard pace and climbs
     much faster than the standard ratio implies.
 -   The vertical interval is huge because, with four routes, the vertical
     factor rests mostly on the one steep route; leaving it out moves the
     estimate far. This is what the 8-route gate is for.
--   Part of Nebelhorn's speed may be effort ("push"), not terrain. The
-    user marked it and Gleitweg as hard (ADR-018). Effort and steepness
+-   Part of Activity A's speed may be effort ("push"), not terrain. The
+    user marked it and Activity B as hard (ADR-018). Effort and steepness
     are therefore confounded in the reference data, and the vertical
     factor above should not be read as climbing ability.
 

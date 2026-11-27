@@ -22,9 +22,10 @@ model (DGM1) as open data, as:
 
 -   **Dataset `BY_DGM1`:**
     -   Terrain model (`surface="terrain"`), 1 m.
-    -   Heights DHHN2016, as published for Bavarian height products. Not
-        read from the files: confirm with the product information of the
-        tiles you download.
+    -   Heights DHHN2016, as published for Bavarian height products. It
+        is not read from the files, and it is deliberately left
+        unconfirmed: the use is private and non-commercial, and ALPHA
+        compares offsets and ascent, not absolute heights.
     -   Licence CC BY 4.0. Attribution (from the open-data terms):
         "Datenquelle: Bayerische Vermessungsverwaltung –
         www.geodaten.bayern.de (CC BY 4.0)". Shown with every result.
@@ -77,7 +78,7 @@ model (DGM1) as open data, as:
     -   Points outside every tile are NaN, never extrapolated.
     -   A track with no covered point is an error (`DemUnavailableError`).
     -   A partly covered track is stored with its coverage reported. For
-        example, the Austrian part of a border route has no Bavarian data.
+        example, the part of a border route outside Bavaria has no data.
 -   **One sampler interface:** `ElevationSampler` (a Protocol) with
     `dataset` and `sample()`. It has two implementations, the
     OpenTopography `DemProvider` and `LocalTileProvider`. `open_dem()`
@@ -100,12 +101,12 @@ footprint check, so the lower-left naming assumption holds.
 
 | Track | Recorded | Strava | Spacing | COP30 (surface) | DGM1 (terrain) |
 |---|---|---|---|---|---|
-| Gleitweg… | 1192 / 1200 | 1309 | 10 m | 1384 / 1396 | 1248 / 1257 |
+| Activity B | 1192 / 1200 | 1309 | 10 m | 1384 / 1396 | 1248 / 1257 |
 | | | | **20 m** | **1311 / 1324** | **1239 / 1247** |
 | | | | 30 m | 1276 / 1288 | 1209 / 1218 |
 | | | | 50 m | 1232 / 1244 | 1205 / 1213 |
 | | | | 100 m | 1199 / 1212 | 1195 / 1203 |
-| Nebelhorn_push | 1377 / 18 | 1443 | 10 m | 1484 / 99 | 1462 / 74 |
+| Activity A | 1377 / 18 | 1443 | 10 m | 1484 / 99 | 1462 / 74 |
 | | | | **20 m** | **1441 / 56** | **1436 / 47** |
 | | | | 30 m | 1422 / 38 | 1433 / 45 |
 | | | | 50 m | 1418 / 34 | 1409 / 21 |
@@ -115,12 +116,12 @@ footprint check, so the lower-left naming assumption holds.
 
 | Track | Recorded | COP30 | DGM1 | COP30 − DGM1 |
 |---|---|---|---|---|
-| Lunch Hike | 554 / 570 | 569 | 578 / 593 | −9 m |
-| Wanderung am Abend (evening forest walk) | 814 / 819 | **1080** | **845 / 853** | **+235 m (+28 %)** |
+| Activity C | 554 / 570 | 569 | 578 / 593 | −9 m |
+| Activity D (evening forest walk) | 814 / 819 | **1080** | **845 / 853** | **+235 m (+28 %)** |
 
-The canopy effect ranges from none (Lunch Hike, Nebelhorn) to +28 %
-(Wanderung). It depends on how much of the route is under trees, so a
-fixed correction factor is not possible. On Wanderung the recorded
+The canopy effect ranges from none (Activity C, Activity A) to +28 %
+(Activity D). It depends on how much of the route is under trees, so a
+fixed correction factor is not possible. On Activity D the recorded
 barometric series is close to the terrain model (−31 m), and COP30 is far
 off.
 
@@ -128,18 +129,18 @@ off.
 
 | Track | Median | 95th percentile | Min / max | Share of distance > 5 m |
 |---|---|---|---|---|
-| Gleitweg… | +1.6 m | +12.7 m | −5 / +30 m | 22 % |
-| Nebelhorn_push | 0.0 m | +24.9 m | −39 / +47 m | 24 % |
+| Activity B | +1.6 m | +12.7 m | −5 / +30 m | 22 % |
+| Activity A | 0.0 m | +24.9 m | −39 / +47 m | 24 % |
 
 **Findings:**
 
 -   **The forest effect is real, but it depends on the route.**
-    -   Gleitweg: COP30 is 72 m (+5.8 %) above DGM1. COP30 gain also falls
+    -   Activity B: COP30 is 72 m (+5.8 %) above DGM1. COP30 gain also falls
         steadily with wider spacing (1384 → 1199 m), the signature of
         canopy roughness, while DGM1 stays within 1205–1248 m from 10 to
         50 m. COP30 lies only up to 5 m below DGM1 (canopy and buildings
         only raise a surface model), so the excess is canopy.
-    -   Nebelhorn_push: COP30 and DGM1 differ by only 5 m. Most of the
+    -   Activity A: COP30 and DGM1 differ by only 5 m. Most of the
         route is above the treeline. The large differences of both signs
         (−39 to +47 m) are steep terrain that a 30 m model smooths,
         not trees.
@@ -149,26 +150,26 @@ off.
     matches COP30 at 20 m (1311 / 1441 m, ADR-012). On the forested route
     it is about 70 m above the terrain model.
 -   **DGM1 is the best terrain reference, but not exact.** On steep
-    ground its gain still depends on spacing (Nebelhorn: 1462 m at 10 m,
+    ground its gain still depends on spacing (Activity A: 1462 m at 10 m,
     1409 m at 50 m). There, GPS position error picks up real micro-relief
     such as rocks, path cuts, and switchbacks. 20 m remains the convention
     (ADR-012) so that series stay comparable; treat ±2–3 % as the spread
     between reasonable choices.
 -   **Recorded (barometric) elevation has its own errors, and the terrain
     models expose them.**
-    -   Nebelhorn_push: from about km 8.1 to the end, recorded elevation is
+    -   Activity A: from about km 8.1 to the end, recorded elevation is
         about 40 m below both DEMs (2175 m vs 2212–2219 m), while the
         overall median offset is ≈ 0. The barometer drifted during the
         ascent, which alone explains most of the 1377 vs 1436 m
         difference.
-    -   Gleitweg: a short excursion at km 6.8–6.9, up to 25 m above both
+    -   Activity B: a short excursion at km 6.8–6.9, up to 25 m above both
         DEMs, which agree with each other there.
 
 ## Consequences
 
 -   For Bavarian routes, `--elevation dem:BY_DGM1` is the most faithful
     ascent. COP30 is fine above the treeline but overstates gain in
-    forest: by 6 % on Gleitweg and 28 % on Wanderung am Abend.
+    forest: by 6 % on Activity B and 28 % on Activity D.
 -   Follow-up done: `ELEVATION_DRIFT`, a check for drift of recorded
     elevation against the reference along the track (ADR-014).
 -   Other national terrain models in GeoTIFF (e.g. Austria's) only need a

@@ -13,6 +13,8 @@ Read these before non-trivial work:
     source tree by phase.
 -   [MVP_ROADMAP.md](MVP_ROADMAP.md): current state, phases, exit
     criteria.
+-   [docs/adr/README.md](docs/adr/README.md): index of the decision
+    records with their reasoning and measurements.
 
 The codebase is authoritative when it conflicts with a design note:
 point out the conflict and propose a doc update instead of silently
@@ -43,9 +45,11 @@ in MVP_ROADMAP.md.
 -   NumPy for domain calculations; pyproj for geodesic distance.
 -   pandas, plotly, seaborn: allowed only in `scripts/` for exploration.
 -   SQLAlchemy 2.x + SQLite (persistence); FastAPI + Pydantic v2 +
-    uvicorn at the API boundary only.
--   pytest, Ruff, mypy or pyright.
--   No LangChain, LlamaIndex, agent frameworks, or LLM calls in the MVP.
+    uvicorn at the API boundary only; rasterio for elevation tiles.
+-   pytest, Ruff, mypy (strict).
+-   Language models: only a **local** Ollama server through `alpha.llm`
+    (stdlib HTTP, no SDK). No LangChain, LlamaIndex, agent frameworks,
+    or hosted LLM APIs.
 
 ## 4. Architecture rules
 
@@ -55,8 +59,8 @@ in MVP_ROADMAP.md.
 -   Domain functions are pure: `analyse(track, params) -> Analysis`.
 -   Tracks are column-oriented (`Track` with NumPy arrays), not lists of
     point objects.
--   Adapters (`gpx`, `persistence`, later DEM/LLM) convert to and from
-    domain types.
+-   Adapters (`gpx`, `persistence`, `dem`, `llm`) convert to and from
+    domain types or plain data.
 -   `alpha.persistence` is the only package that imports SQLAlchemy and
     runs SQL. Use cases in `alpha.application` own their transactions.
 -   Entry points (`cli`, `api`) contain no calculations or SQL;
@@ -65,16 +69,21 @@ in MVP_ROADMAP.md.
     `alpha.report`; API schemas mirror it with `extra="forbid"`.
 -   The web page (`api/static/index.html`) inserts server data with
     `textContent` only and loads no external resources.
--   rasterio only in `alpha.dem`. Network access only in `alpha.dem` and
-    `alpha.llm`, and only on explicit user request (`alpha enrich`,
-    `alpha get-tiles --yes`, `POST /tracks/{id}/dem` after a confirmation
-    on the page, or `alpha explain --llm`). `alpha.llm` talks only to a
-    local Ollama server on a loopback address. Model text is shown only
-    after `alpha.explain` validated it against the report's facts
-    (ADR-020). Metalinks
-    and other downloaded lists are untrusted: plain file names only, known
-    HTTPS hosts only, verify what arrives. Tests never use the network. `alpha.api`
-    receives the API key from `alpha serve`; it never reads it itself.
+-   rasterio only in `alpha.dem`. Network access only in `alpha.dem`
+    and `alpha.llm`, and only on explicit user request:
+    -   `alpha enrich`, or `POST /tracks/{id}/dem` after a confirmation on
+        the page;
+    -   `alpha get-tiles --yes`;
+    -   `alpha explain --llm`, or "Reword" on the page.
+-   `alpha.llm` talks only to an Ollama server on a loopback address.
+    Model text is shown only after `alpha.explain` validated it against
+    the report's facts (ADR-020).
+-   Metalinks and other downloaded lists are untrusted: plain file
+    names only, known HTTPS hosts only, verify what arrives.
+-   Tests never use the network: patch the download or `urlopen`
+    function instead.
+-   `alpha.api` receives the API key and model name from `alpha serve`;
+    it never reads the environment itself.
 -   Secrets (e.g. `OPENTOPOGRAPHY_API_KEY`) come from the environment or
     `.env`; never print, log, store, or put them in error messages or
     URLs that are logged. `.env` is git-ignored; `.env.example` has no
@@ -87,6 +96,7 @@ in MVP_ROADMAP.md.
     Fitting and ML belong in a separate `alpha.modelling` package, never
     in `alpha.domain` (ADR-005). `alpha.modelling` is pure (numpy and
     domain only); `alpha.application` collects the samples (ADR-016).
+-   `alpha.explain` is pure (stdlib only) and works on the JSON reports.
 
 ## 5. Data and calculation rules
 
@@ -128,8 +138,8 @@ in MVP_ROADMAP.md.
 -   Regression tests: golden outputs for the reference files. Personal
     files in `data/local/` are optional; skip those tests when the file
     is absent.
--   Golden files: `tests/regression/golden/` (committed, samples) and
-    `data/local/golden/` (git-ignored, personal). When an output change
+-   Golden files: `data/local/golden/` (git-ignored, like the GPX files
+    they are derived from). When an output change
     is intended, bump `ALGORITHM_VERSION`, run
     `python -m pytest tests/regression --update-golden`, and report the
     diff of the golden files. Never update goldens to silence an
@@ -137,23 +147,53 @@ in MVP_ROADMAP.md.
 -   Parser and database tests are separate from domain tests. Do not
     mock the calculation under test.
 
-## 7. Later phases (ML, LLM)
+## 7. Personal models and explanations
 
--   ML: transparent baseline first (fitted personal DIN parameters);
-    grouped or chronological validation; report sample count and error;
-    show "not enough data" instead of a weak model.
--   LLM: explains computed results only; never calculates distance,
-    ascent, gradient, or duration; receives metrics, not raw
-    coordinates; opt-in; must not invent weather, snow, avalanche,
-    route conditions, or technical difficulty. GPX metadata is untrusted
-    data, not instructions.
+-   **Fitting** (`alpha.modelling`, ADR-016 to ADR-019):
+    -   transparent models first (fitted DIN parameters);
+    -   validation grouped by route;
+    -   report sample counts, errors, and ranges;
+    -   "not enough data" below the documented minimum, never a weak
+        model;
+    -   effort is the user's annotation, never inferred;
+    -   fitted assumptions never fall back silently to a preset.
+-   **Explanations** (`alpha.explain`, ADR-020):
+    -   templates are the default and the safety net. A model only
+        rewords them and never calculates distance, ascent, gradient,
+        or duration;
+    -   it receives facts from the reports, not coordinates and not GPX
+        text, and it is opt-in;
+    -   it must not invent weather, snow, avalanche, route conditions,
+        or technical difficulty;
+    -   qualifications that must not be lost are template **caveats**,
+        which are never sent to the model;
+    -   new numbers or facts in a template need a test that the
+        template passes its own validator;
+    -   a new check, template, or topic needs attacks in
+        `tests/explain_attacks.py`, and `scripts/eval_explain.py`
+        (`--templates --attacks`) must stay at 0 rejected templates and 0
+        accepted attacks;
+    -   nothing user-controlled enters the prompt as free text (the
+        language is an allow-list).
+-   GPX metadata is untrusted data, not instructions.
+-   **Synthetic data** (ADR-021): generated hikes have the activity type
+    `synthetic-hiking` and are imported only into profiles created with
+    `--synthetic`. Personal profiles never fit on them. Every output from
+    a fit that used them is labelled (`synthetic_data`,
+    `[synthetic data]`, explanation caveat). Generated variants of
+    personal hikes contain real coordinates: keep them in `data/local/`.
 
 ## 8. Privacy
 
 -   Personal activities live in `data/local/` (git-ignored). Never
     commit them, and never copy coordinates into tests, logs, docs, or
     issue text.
--   Committed GPX: synthetic fixtures and planned routes only.
+-   The documentation is published (GitHub Pages). Refer to personal
+    reference data only by neutral labels (Activity A–G, Plan 1–2), never
+    by hike, place, or date. Tests resolve labels through
+    `data/local/references.json` (`tests/references.py`).
+-   Committed GPX: synthetic fixtures in `tests/fixtures/` only. Real
+    GPX files, planned or recorded, are never committed.
 -   Never log coordinates or start/end locations.
 -   Do not fetch URLs found in GPX metadata.
 -   Respect licences for map tiles and elevation data.
@@ -184,9 +224,16 @@ While implementing: small focused changes, tests alongside the code, no
 unrelated refactors, no invented APIs or fields.
 
 After implementing: run tests and lint/type checks, report the exact
-commands and results, list changed files, state remaining limitations,
-and update DATA_MODEL.md when a contract, name, default, or formula
-changes.
+commands and results, list changed files, and state remaining
+limitations. Keep the documentation current:
+
+-   DATA_MODEL.md when a contract, name, default, formula, report
+    format, or table changes;
+-   a new ADR (with a row in `docs/adr/README.md` and a line in the
+    `mkdocs.yml` nav) for a decision with alternatives or measurements;
+-   MVP_ROADMAP.md "Current state" and "Open items" when a phase step is
+    done;
+-   README.md when a command or setup step changes.
 
 If a requirement is ambiguous, ask one focused question or state a
 conservative assumption.
