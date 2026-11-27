@@ -45,10 +45,10 @@ Ascent / descent (m) by threshold on the reference files:
 
 | File | 0 m | 1 m | 3 m | 5 m | 10 m |
 |---|---|---|---|---|---|
-| input.gpx (planner) | 1368 / 0 | 1368 / 0 | 1368 / 0 | 1368 / 0 | 1368 / 0 |
-| input2.gpx (planner) | 1301 / 10 | 1301 / 10 | 1301 / 10 | 1301 / 10 | 1301 / 10 |
-| Nebelhorn_push (Strava) | 1384 / 26 | 1384 / 25 | 1377 / 18 | 1377 / 14 | 1372 / 14 |
-| Gleitweg… (Strava) | 1200 / 1208 | 1197 / 1205 | 1192 / 1200 | 1178 / 1189 | 1178 / 1189 |
+| Plan 1 (planner) | 1368 / 0 | 1368 / 0 | 1368 / 0 | 1368 / 0 | 1368 / 0 |
+| Plan 2 (planner) | 1301 / 10 | 1301 / 10 | 1301 / 10 | 1301 / 10 | 1301 / 10 |
+| Activity A (Strava) | 1384 / 26 | 1384 / 25 | 1377 / 18 | 1377 / 14 | 1372 / 14 |
+| Activity B (Strava) | 1200 / 1208 | 1197 / 1205 | 1192 / 1200 | 1178 / 1189 | 1178 / 1189 |
 
 Planner elevation is already smooth, so it is unaffected. Strava
 elevation (0.1 m resolution, likely barometric) loses about 0.5 % at
@@ -65,8 +65,8 @@ elevation (0.1 m resolution, likely barometric) loses about 0.5 % at
 
 | Activity | Strava gain | Unfiltered sum of GPX `<ele>` (threshold 0) | ALPHA (3 m) |
 |---|---|---|---|
-| Nebelhorn_push | 1443 m | 1384 m | 1377 m |
-| Gleitweg… | 1309 m | 1200 m | 1192 m |
+| Activity A | 1443 m | 1384 m | 1377 m |
+| Activity B | 1309 m | 1200 m | 1192 m |
 
 Strava's gain is **higher than the plain sum of every positive step** in
 the exported elevation. No threshold or smoothing can produce more gain
@@ -78,13 +78,13 @@ about 0.5 % relative to the exported data.
 
 **Resolved by ADR-012 (Phase 6):** Copernicus GLO-30 DEM elevation,
 sampled every 20 m along the track with the same 3 m threshold, gives
-1441 m (Nebelhorn_push) and 1311 m (Gleitweg), within 2 m of Strava's
+1441 m (Activity A) and 1311 m (Activity B), within 2 m of Strava's
 1443 m and 1309 m. Strava's gain is therefore DEM-based; the recorded
 barometric series legitimately gives less. ALPHA reports both, labelled
 by source, and keeps 3 m as the threshold for both.
 
 **Refined by ADR-013:** the Bavarian 1 m terrain model (no trees) gives
-1239 m on Gleitweg (Strava and COP30: about 1310 m, so canopy accounts
-for about 70 m) and 1436 m on Nebelhorn_push (mostly above the treeline;
-same as COP30). On Nebelhorn_push the recorded series falls about 40 m
+1239 m on Activity B (Strava and COP30: about 1310 m, so canopy accounts
+for about 70 m) and 1436 m on Activity A (mostly above the treeline;
+same as COP30). On Activity A the recorded series falls about 40 m
 short at the summit because of barometer drift.

@@ -8,13 +8,16 @@ import pytest
 from alpha.application.scenarios import ObservedRelation, estimate_duration
 from alpha.application.tracks import Workspace, edit_track, import_file
 from alpha.domain.scenarios import DIN_33466_STANDARD
+from tests.references import reference_path
 
 ROOT = Path(__file__).resolve().parents[2]
-PLAN = ROOT / "data/samples/input.gpx"
-ACTIVITY = ROOT / "data/local/Nebelhorn_push.gpx"
+PLAN = reference_path("plan_1")
+ACTIVITY = reference_path("activity_a")
 
 
 def test_plan_estimate_next_to_observed_activity(tmp_path: Path) -> None:
+    if PLAN is None:
+        pytest.skip("plan_1 not available (personal data)")
     ws = Workspace(tmp_path)
     try:
         plan = import_file(ws, PLAN.name, PLAN.read_bytes()).tracks[0].id
@@ -24,8 +27,8 @@ def test_plan_estimate_next_to_observed_activity(tmp_path: Path) -> None:
         assert baseline.label == "baseline"
         assert baseline.breakdown.moving_s == pytest.approx(5.41 * 3600, abs=60)
 
-        if not ACTIVITY.exists():
-            pytest.skip("Nebelhorn_push.gpx not present (personal data is not in Git)")
+        if ACTIVITY is None:
+            pytest.skip("activity_a not available (personal data)")
         act = import_file(ws, ACTIVITY.name, ACTIVITY.read_bytes()).tracks[0].id
         edit_track(ws, act, planned_track_id=plan)
         (observed,) = estimate_duration(ws, plan, DIN_33466_STANDARD).observed

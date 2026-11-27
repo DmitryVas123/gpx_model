@@ -4,15 +4,17 @@ data/local/
 *.sqlite
 *.sqlite3
 
-# Any GPX outside the shareable locations is treated as personal.
+# Every GPX is personal except the synthetic test fixtures.
 *.gpx
-!data/samples/*.gpx
 !tests/fixtures/**/*.gpx
 
 # --- Secrets ---
 .env
 .env.*
 !.env.example
+
+# --- Documentation site (generated; sources: build/site_src) ---
+site/
 
 # --- Python ---
 __pycache__/
@@ -37,3 +39,5 @@ htmlcov/
 # --- Exploration output ---
 *.html
 !docs/**/*.html
+# The local web page is source code, not output.
+!src/alpha/api/static/*.html

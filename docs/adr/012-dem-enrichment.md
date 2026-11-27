@@ -1,6 +1,6 @@
 # ADR-012: DEM enrichment via OpenTopography
 
--   **Status:** Accepted (first step of Phase 6)
+-   **Status:** Accepted (Phase 6; completed by ADR-013 to ADR-015)
 -   **Date:** 2026-11-22
 -   **Code:** `alpha.dem`, `alpha.domain.reference_elevation`,
     `alpha.application.elevation`, `alpha enrich`
@@ -45,9 +45,9 @@ against.
 
     | Track | DEM gain at every point (threshold 0 / 3 m) | DEM gain at 20 m spacing (3 m) | Strava |
     |---|---|---|---|
-    | Nebelhorn_push | 1862 / 1531 m | **1441 m** | 1443 m |
-    | Gleitweg… | 2224 / 1481 m | **1311 m** | 1309 m |
-    | input.gpx (planner, 9 m spacing) | 1458 / 1444 m | 1404 m | — |
+    | Activity A | 1862 / 1531 m | **1441 m** | 1443 m |
+    | Activity B | 2224 / 1481 m | **1311 m** | 1309 m |
+    | Plan 1 (planner, 9 m spacing) | 1458 / 1444 m | 1404 m | — |
 
     The DEM is sampled at *knots*: per source segment, the first point,
     every point of the displacement filter (ADR-010) at 20 m, and the last
@@ -80,10 +80,10 @@ against.
 
 | Track | Recorded − DEM median | Spread (std) | 95 % within | Recorded gain | DEM gain |
 |---|---|---|---|---|---|
-| input.gpx (mapy) | −0.7 m | 7.1 m | ±16 m | 1368 m | 1404 m |
-| input2.gpx (mapy) | ≈ −7 m | ≈ 6 m | ±18 m | 1301 m | 1331 m |
-| Nebelhorn_push (Strava) | −0.1 m | 12.5 m | ±35 m | 1377 m | 1441 m |
-| Gleitweg… (Strava) | −0.4 m | 5.1 m | ±12 m | 1192 m | 1311 m |
+| Plan 1 (mapy) | −0.7 m | 7.1 m | ±16 m | 1368 m | 1404 m |
+| Plan 2 (mapy) | ≈ −7 m | ≈ 6 m | ±18 m | 1301 m | 1331 m |
+| Activity A (Strava) | −0.1 m | 12.5 m | ±35 m | 1377 m | 1441 m |
+| Activity B (Strava) | −0.4 m | 5.1 m | ±12 m | 1192 m | 1311 m |
 
 ## Consequences
 

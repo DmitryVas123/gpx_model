@@ -1,0 +1,625 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ALPHA</title>
+<style>
+  :root {
+    --bg: #f7f7f5; --panel: #ffffff; --text: #1d1d1b; --muted: #6b6b66;
+    --line: #dcdcd6; --accent: #2b5c8f; --area: rgba(43, 92, 143, 0.14);
+    --warn: #9a5b00; --est: #6b3fa0; --obs: #1f7a4d;
+    --g0: #e8eef5; --g1: #b9cde3; --g2: #f2c46d; --g3: #e48a3c; --g4: #c0392b; --g5: #7d1d12;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16171a; --panel: #1f2125; --text: #e8e8e3; --muted: #9a9a93;
+      --line: #34363b; --accent: #7fb0e0; --area: rgba(127, 176, 224, 0.16);
+      --warn: #e0a84a; --est: #b99be0; --obs: #6fcf9a;
+      --g0: #2a3440; --g1: #3d5875; --g2: #a8843d; --g3: #c06a2a; --g4: #d0503f; --g5: #f08a7a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header, main { max-width: 1100px; margin: 0 auto; padding: 16px; }
+  header h1 { margin: 0; font-size: 20px; }
+  header p { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+            padding: 14px 16px; margin-bottom: 16px; }
+  h2 { font-size: 15px; margin: 0 0 10px; }
+  h3 { font-size: 13px; margin: 14px 0 6px; color: var(--muted); text-transform: uppercase;
+       letter-spacing: .04em; }
+  table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+  th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; }
+  td.num, th.num { text-align: right; }
+  tr.selected td { background: var(--area); }
+  button, select, input { font: inherit; color: inherit; background: var(--bg);
+                          border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; }
+  button { cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  .row { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; }
+  .muted { color: var(--muted); }
+  .tag { font-size: 11px; padding: 1px 6px; border-radius: 10px; border: 1px solid currentColor; }
+  .estimated { color: var(--est); } .observed { color: var(--obs); } .unknown { color: var(--muted); }
+  .warn { color: var(--warn); }
+  .metrics { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px; }
+  .metric { border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; }
+  .metric .label { color: var(--muted); font-size: 12px; }
+  .metric .value { font-size: 17px; font-variant-numeric: tabular-nums; }
+  svg { width: 100%; height: auto; display: block; }
+  svg text { fill: var(--muted); font-size: 11px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 10px; font-size: 12px; color: var(--muted); }
+  .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; }
+  .error { color: var(--warn); }
+  ul.notes { margin: 6px 0 0; padding-left: 18px; color: var(--muted); font-size: 13px; }
+  .scroll { overflow-x: auto; }
+  label { color: var(--muted); font-size: 13px; }
+  label input { width: 80px; margin-left: 4px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>ALPHA</h1>
+  <p>Measured, calculated, estimated, and unknown values for your GPX routes and activities.
+     Not a navigation system; it never says a route is safe. Data stays on this computer.</p>
+</header>
+<main>
+  <section>
+    <h2>Import</h2>
+    <div class="row">
+      <input type="file" id="files" accept=".gpx,application/gpx+xml" multiple>
+      <span id="import-status" class="muted"></span>
+    </div>
+  </section>
+
+  <section>
+    <h2>Tracks</h2>
+    <div class="row" style="margin-bottom:8px">
+      <label>Elevation for details, compare, and scenarios
+        <select id="elevation">
+          <option value="recorded">recorded (from the GPX file)</option>
+          <option value="dem:COP30">DEM: Copernicus GLO-30 (tracks with DEM elevation)</option>
+        </select>
+      </label>
+    </div>
+    <div class="scroll"><table id="tracks"></table></div>
+    <p class="muted" id="guess-hint" hidden>? = kind guessed from the data; correct it in the track details.</p>
+  </section>
+
+  <section id="detail" hidden>
+    <h2 id="detail-title"></h2>
+    <div class="row muted" id="detail-meta"></div>
+    <div class="row" id="detail-edit" style="margin-top:8px"></div>
+    <h3>Summary <span class="tag">calculated</span></h3>
+    <div class="metrics" id="detail-metrics"></div>
+    <h3>Elevation profile and gradient</h3>
+    <div id="profile"></div>
+    <div class="legend" id="legend"></div>
+    <h3>Climb sections</h3>
+    <div class="scroll"><table id="climbs"></table></div>
+    <h3>Warnings</h3>
+    <ul class="notes" id="warnings"></ul>
+    <h3>Elevation check: recorded vs DEM</h3>
+    <div id="dem"></div>
+  </section>
+
+  <section>
+    <h2>Compare</h2>
+    <div class="row">
+      <label>A <select id="cmp-a"></select></label>
+      <label>B <select id="cmp-b"></select></label>
+      <button id="cmp-run">Compare B against A</button>
+    </div>
+    <div class="scroll" id="cmp-out"></div>
+  </section>
+
+  <section>
+    <h2>Duration scenarios <span class="tag estimated">estimated</span></h2>
+    <div class="row">
+      <label>Track <select id="sc-track"></select></label>
+      <label>Assumptions <select id="sc-source">
+        <option value="standard">DIN 33466 standard or my speeds</option>
+        <option value="personal">Personal (fitted from my activities)</option>
+      </select></label>
+      <label>Horizontal km/h <input id="sc-h" type="number" step="0.1" placeholder="4"></label>
+      <label>Ascent m/h <input id="sc-up" type="number" step="10" placeholder="300"></label>
+      <label>Descent m/h <input id="sc-down" type="number" step="10" placeholder="500"></label>
+      <label>Breaks min <input id="sc-break" type="number" step="5" value="0"></label>
+      <button id="sc-run">Estimate</button>
+    </div>
+    <p class="muted">Empty speeds use the DIN 33466 standard values (an average hiker, not you).
+      Personal speeds are fitted from your normal-effort activities and need enough routes (see <code>alpha baseline</code>).</p>
+    <div class="scroll" id="sc-out"></div>
+  </section>
+
+  <section>
+    <h2>Personal speeds <span class="tag">fitted</span></h2>
+    <p class="muted">Fitted from your normal-effort activities (see <code>alpha baseline</code>).</p>
+    <div class="row"><button id="bl-explain">Explain my personal speeds</button></div>
+    <div id="bl-out"></div>
+  </section>
+</main>
+
+<script>
+"use strict";
+// Every value from the server is inserted with textContent: track names come
+// from GPX files and are untrusted.
+const $ = (id) => document.getElementById(id);
+const elevationQuery = () => "elevation=" + encodeURIComponent($("elevation").value);
+// DEM-derived values must always be shown with the dataset's attribution.
+function seriesNote(series) {
+  if (!series || series.source !== "dem") return el("p", { class: "muted" }, "Elevation: recorded (from the GPX file).");
+  return el("p", { class: "muted" },
+    `Elevation: DEM ${series.dataset_name} (${series.resolution_m} m ${series.surface} model, ${series.vertical_datum}), `
+    + `sampled every ${series.sample_spacing_m} m. ${series.attribution}`);
+}
+let tracks = [];
+let selected = null;
+let demInfo = { datasets: [], downloads_available: false };
+
+function el(tag, attrs = {}, ...children) {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "class") node.className = v; else node.setAttribute(k, v);
+  }
+  for (const c of children) node.append(c instanceof Node ? c : document.createTextNode(c == null ? "" : String(c)));
+  return node;
+}
+const svgEl = (tag, attrs = {}) => {
+  const node = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
+  return node;
+};
+
+const km = (m) => m == null ? "unknown" : (m / 1000).toFixed(2) + " km";
+const metres = (m) => m == null ? "unknown" : Math.round(m) + " m";
+const hm = (s) => {
+  if (s == null) return "unknown";
+  const min = Math.round(s / 60);
+  return Math.floor(min / 60) + ":" + String(min % 60).padStart(2, "0") + " h";
+};
+const signed = (v, fmt) => v == null ? "–" : (v >= 0 ? "+" : "−") + fmt(Math.abs(v));
+const guess = (inferred) => inferred.inferred_by === "heuristic" ? "?" : "";
+const trackName = (r) => `#${r.id} ${r.name || "(unnamed)"}`;
+
+async function api(path, options = {}) {
+  const response = await fetch(path, options);
+  const body = await response.json().catch(() => null);
+  if (!response.ok) {
+    const e = body && body.error ? body.error : { code: String(response.status), message: "" };
+    throw new Error(`${e.code}: ${e.message}`);
+  }
+  return body;
+}
+
+function showError(container, error) {
+  container.replaceChildren(el("p", { class: "error" }, String(error.message || error)));
+}
+
+// --- import -------------------------------------------------------------------------
+$("files").addEventListener("change", async (event) => {
+  const status = $("import-status");
+  const lines = [];
+  for (const file of event.target.files) {
+    try {
+      const r = await api(`/files?filename=${encodeURIComponent(file.name)}`, {
+        method: "POST", body: file, headers: { "Content-Type": "application/gpx+xml" },
+      });
+      lines.push(`${file.name}: ${r.created ? "imported" : "already imported"}`);
+    } catch (e) { lines.push(`${file.name}: ${e.message}`); }
+  }
+  status.textContent = lines.join(" · ");
+  event.target.value = "";
+  await loadTracks();
+});
+
+// --- track list -----------------------------------------------------------------------
+async function loadTracks() {
+  tracks = await api("/tracks");
+  const table = $("tracks");
+  table.replaceChildren(el("tr", {},
+    el("th", {}, "ID"), el("th", {}, "Kind"), el("th", {}, "Date (UTC)"),
+    el("th", { class: "num" }, "Distance"), el("th", { class: "num" }, "Ascent"),
+    el("th", { class: "num" }, "Moving"), el("th", {}, "DEM"), el("th", {}, "Name"), el("th", {}, "")));
+  for (const item of tracks) {
+    const r = item.record, s = item.summary;
+    const row = el("tr", selected === r.id ? { class: "selected" } : {},
+      el("td", {}, String(r.id)),
+      el("td", {}, r.kind.value + guess(r.kind)),
+      el("td", {}, r.started_at_utc ? r.started_at_utc.slice(0, 10) : "–"),
+      el("td", { class: "num" }, km(s.distance_m.value)),
+      el("td", { class: "num" }, metres(s.ascent_m.value)),
+      el("td", { class: "num" }, s.moving_time_s.value == null ? "–" : hm(s.moving_time_s.value)),
+      el("td", {}, item.dem_datasets.length ? item.dem_datasets.join(", ") : "–"),
+      el("td", {}, (r.name || "(unnamed)") + (r.planned_track_id ? `  (plan #${r.planned_track_id})` : "")),
+      el("td", {}, button("Details", () => showTrack(r.id))));
+    table.append(row);
+  }
+  if (!tracks.length) table.append(el("tr", {}, el("td", { colspan: "9", class: "muted" }, "No tracks yet. Import a GPX file above.")));
+  $("guess-hint").hidden = !tracks.some((i) => i.record.kind.inferred_by === "heuristic");
+  for (const id of ["cmp-a", "cmp-b", "sc-track"]) fillSelect($(id));
+  if (tracks.length > 1 && $("cmp-b").selectedIndex === 0) $("cmp-b").selectedIndex = 1;
+}
+
+function button(text, onClick) {
+  const b = el("button", { type: "button" }, text);
+  b.addEventListener("click", onClick);
+  return b;
+}
+
+function fillSelect(select, filter = () => true) {
+  const previous = select.value;
+  select.replaceChildren(...tracks.filter(filter).map((i) =>
+    el("option", { value: String(i.record.id) }, trackName(i.record))));
+  if ([...select.options].some((o) => o.value === previous)) select.value = previous;
+}
+
+// --- track detail -------------------------------------------------------------------
+async function showTrack(id) {
+  selected = id;
+  $("detail").hidden = false;
+  // Before the analysis: if the DEM series is selected but missing, this is
+  // where it can be added.
+  await renderDem(id);
+  let t;
+  try { t = await api(`/tracks/${id}?${elevationQuery()}`); } catch (e) { showError($("detail-metrics"), e); return; }
+  const record = tracks.find((i) => i.record.id === id).record;
+  $("detail-title").textContent = trackName(record);
+  $("detail-meta").replaceChildren(
+    el("span", {}, `kind: ${t.track.kind.value} (${t.track.kind.inferred_by})`),
+    el("span", {}, `elevation: ${t.track.elevation_source.value} (${t.track.elevation_source.inferred_by})`),
+    el("span", {}, `from ${t.stored.source_filename}`),
+    el("span", {}, `algorithm ${t.analysis.algorithm_version}, params ${t.analysis.params_hash.slice(0, 12)}`),
+    seriesNote(t.elevation_series));
+  renderEdit(record);
+
+  const s = t.summary;
+  const metric = (label, value, unknown) =>
+    el("div", { class: "metric" }, el("div", { class: "label" }, label),
+       el("div", { class: "value" + (unknown ? " unknown" : "") }, value));
+  $("detail-metrics").replaceChildren(
+    metric("Distance", km(s.distance_m.value)),
+    metric("Ascent / descent", `${metres(s.ascent_m.value)} / ${metres(s.descent_m.value)}`, s.ascent_m.value == null),
+    metric("Elevation range", `${metres(s.min_elevation_m.value)} – ${metres(s.max_elevation_m.value)}`, s.min_elevation_m.value == null),
+    metric("Elapsed time", hm(s.elapsed_time_s.value), s.elapsed_time_s.value == null),
+    metric("Moving time", hm(s.moving_time_s.value), s.moving_time_s.value == null),
+    metric("Stopped time", hm(s.stopped_time_s.value), s.stopped_time_s.value == null));
+  renderProfile(t);
+  renderClimbs(t.climb_sections);
+  const warnings = [...record.read_warnings, ...t.warnings];
+  $("warnings").replaceChildren(...(warnings.length
+    ? warnings.map((w) => el("li", { class: "warn" }, `${w.code}: ${w.message}`))
+    : [el("li", {}, "none")]));
+  await loadTracks();
+}
+
+function renderEdit(record) {
+  const box = $("detail-edit");
+  const kind = el("select", {}, ...["planned", "activity", "unknown"].map((k) => el("option", { value: k }, k)));
+  kind.value = record.kind.value;
+  const parts = [el("label", {}, "Kind ", kind), button("Save kind", () => patch(record.id, { kind: kind.value }))];
+  if (record.kind.value === "activity") {
+    const plan = el("select", {}, el("option", { value: "" }, "— no plan —"));
+    for (const i of tracks.filter((i) => i.record.kind.value === "planned")) {
+      plan.append(el("option", { value: String(i.record.id) }, trackName(i.record)));
+    }
+    plan.value = record.planned_track_id ? String(record.planned_track_id) : "";
+    parts.push(el("label", {}, "Followed plan ", plan), button("Save link", () => patch(record.id,
+      plan.value ? { planned_track_id: Number(plan.value) } : { clear_planned_track: true })));
+  }
+  box.replaceChildren(...parts);
+}
+
+async function patch(id, body) {
+  try {
+    await api(`/tracks/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    await loadTracks();
+    await showTrack(id);
+  } catch (e) { alert(e.message); }
+}
+
+const BANDS = [
+  ["< 5 %", 5, "--g0"], ["5–15 %", 15, "--g1"], ["15–25 %", 25, "--g2"],
+  ["25–40 %", 40, "--g3"], ["40–60 %", 60, "--g4"], ["≥ 60 %", Infinity, "--g5"],
+];
+const bandColor = (g) => g == null ? "var(--line)" : `var(${BANDS.find(([, hi]) => Math.abs(g) < hi)[2]})`;
+
+function renderProfile(t) {
+  const bins = t.profile.filter((b) => b.ele_start_m != null && b.ele_end_m != null);
+  const box = $("profile");
+  if (!bins.length) { box.replaceChildren(el("p", { class: "muted" }, "No elevation: profile unknown.")); $("legend").replaceChildren(); return; }
+  const W = 1000, H = 260, L = 50, R = 10, T = 10, strip = 14, B = 34 + strip;
+  const total = bins[bins.length - 1].end_distance_m;
+  const eles = bins.flatMap((b) => [b.ele_start_m, b.ele_end_m]);
+  let lo = Math.min(...eles), hi = Math.max(...eles);
+  const pad = Math.max(10, (hi - lo) * 0.05); lo -= pad; hi += pad;
+  const x = (d) => L + (d / total) * (W - L - R);
+  const y = (e) => T + (1 - (e - lo) / (hi - lo)) * (H - T - B);
+  const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "img",
+    "aria-label": `Elevation profile, ${km(total)}, ${metres(lo + pad)} to ${metres(hi - pad)}` });
+
+  const points = [[x(0), y(bins[0].ele_start_m)], ...bins.map((b) => [x(b.end_distance_m), y(b.ele_end_m)])];
+  const line = points.map(([px, py]) => `${px.toFixed(1)},${py.toFixed(1)}`).join(" ");
+  const base = H - B;
+  svg.append(svgEl("polygon", { points: `${x(0)},${base} ${line} ${x(total)},${base}`, fill: "var(--area)" }));
+  svg.append(svgEl("polyline", { points: line, fill: "none", stroke: "var(--accent)", "stroke-width": "2" }));
+  for (const b of t.profile) {
+    const rect = svgEl("rect", { x: x(b.start_distance_m), y: base + 4, height: strip,
+      width: Math.max(0.5, x(b.end_distance_m) - x(b.start_distance_m)), fill: bandColor(b.gradient_percent) });
+    const title = svgEl("title");
+    title.textContent = `km ${(b.start_distance_m / 1000).toFixed(2)}: ${b.gradient_percent == null ? "unknown" : b.gradient_percent.toFixed(0) + " %"}`;
+    rect.append(title); svg.append(rect);
+  }
+  const ticks = 5;
+  for (let i = 0; i <= ticks; i++) {
+    const e = lo + pad + (i / ticks) * (hi - lo - 2 * pad);
+    svg.append(svgEl("line", { x1: L, x2: W - R, y1: y(e), y2: y(e), stroke: "var(--line)", "stroke-width": "0.5" }));
+    const label = svgEl("text", { x: L - 6, y: y(e) + 4, "text-anchor": "end" }); label.textContent = Math.round(e) + " m"; svg.append(label);
+  }
+  const step = total > 20000 ? 5000 : total > 5000 ? 1000 : 500;
+  for (let d = 0; d <= total; d += step) {
+    const label = svgEl("text", { x: x(d), y: H - 6, "text-anchor": "middle" }); label.textContent = (d / 1000) + " km"; svg.append(label);
+  }
+  box.replaceChildren(svg);
+  $("legend").replaceChildren(el("span", {}, "Gradient per 50 m bin (absolute):"), ...BANDS.map(([label, , color]) =>
+    el("span", {}, el("span", { class: "swatch", style: `background: var(${color})` }), label)));
+}
+
+function renderClimbs(climbs) {
+  const table = $("climbs");
+  table.replaceChildren(el("tr", {}, el("th", {}, "Direction"), el("th", { class: "num" }, "From km"),
+    el("th", { class: "num" }, "Length"), el("th", { class: "num" }, "Change"),
+    el("th", { class: "num" }, "Mean"), el("th", { class: "num" }, "Steepest bin")));
+  for (const c of climbs) {
+    table.append(el("tr", {}, el("td", {}, c.direction),
+      el("td", { class: "num" }, (c.start_distance_m / 1000).toFixed(2)),
+      el("td", { class: "num" }, km(c.end_distance_m - c.start_distance_m)),
+      el("td", { class: "num" }, (c.direction === "up" ? "+" : "−") + metres(c.elevation_change_m)),
+      el("td", { class: "num" }, c.mean_gradient_percent.toFixed(0) + " %"),
+      el("td", { class: "num" }, c.max_bin_gradient_percent.toFixed(0) + " %")));
+  }
+  if (!climbs.length) table.append(el("tr", {}, el("td", { colspan: "6", class: "muted" }, "none")));
+}
+
+// --- compare ----------------------------------------------------------------------------
+const METRIC_LABELS = {
+  distance_m: ["Distance", km], distance_3d_m: ["Distance 3D", km], ascent_m: ["Ascent", metres],
+  descent_m: ["Descent", metres], min_elevation_m: ["Lowest point", metres],
+  max_elevation_m: ["Highest point", metres], elapsed_time_s: ["Elapsed time", hm], moving_time_s: ["Moving time", hm],
+};
+
+$("cmp-run").addEventListener("click", async () => {
+  const out = $("cmp-out");
+  try {
+    const c = await api(`/comparisons?a=${$("cmp-a").value}&b=${$("cmp-b").value}&${elevationQuery()}`);
+    const table = el("table", {}, el("tr", {}, el("th", {}, "Metric"), el("th", { class: "num" }, "A"),
+      el("th", { class: "num" }, "B"), el("th", { class: "num" }, "B − A"), el("th", { class: "num" }, "B / A"), el("th", {}, "")));
+    for (const m of c.metrics) {
+      const [label, fmt] = METRIC_LABELS[m.metric];
+      table.append(el("tr", {}, el("td", {}, label), el("td", { class: "num" }, fmt(m.a)), el("td", { class: "num" }, fmt(m.b)),
+        el("td", { class: "num" }, signed(m.delta, fmt)), el("td", { class: "num" }, m.ratio == null ? "–" : m.ratio.toFixed(2)),
+        el("td", { class: "warn" }, m.material ? "large difference" : "")));
+    }
+    const bands = el("table", {}, el("tr", {}, el("th", {}, "Gradient band"), el("th", { class: "num" }, "A"),
+      el("th", { class: "num" }, "B"), el("th", { class: "num" }, "B − A")));
+    for (const b of c.gradient_bands_m) {
+      if (b.band === "unknown" && !b.a && !b.b) continue;
+      bands.append(el("tr", {}, el("td", {}, b.band === "unknown" ? "unknown" : b.band + " %"), el("td", { class: "num" }, km(b.a)),
+        el("td", { class: "num" }, km(b.b)), el("td", { class: "num" + (b.material ? " warn" : "") }, signed(b.delta, km))));
+    }
+    out.replaceChildren(el("h3", {}, `B ${c.b.id} against A ${c.a.id}`), table,
+      el("p", { class: "muted" }, "“Large difference” is a display hint, not a verdict."),
+      el("h3", {}, "Gradient distribution"), bands,
+      el("h3", {}, "Notes"), el("ul", { class: "notes" }, ...c.notes.map((n) => el("li", {}, n))),
+      seriesNote(c.elevation_series.a));
+  } catch (e) { showError(out, e); }
+});
+
+// --- scenarios ------------------------------------------------------------------------
+$("sc-run").addEventListener("click", async () => {
+  const out = $("sc-out");
+  const q = new URLSearchParams();
+  const add = (key, id) => { if ($(id).value !== "") q.set(key, $(id).value); };
+  const personal = $("sc-source").value === "personal";
+  if (personal) q.set("assumptions", "personal");
+  else { add("horizontal_speed_km_h", "sc-h"); add("ascent_rate_m_h", "sc-up"); add("descent_rate_m_h", "sc-down"); }
+  add("break_min", "sc-break");
+  q.set("elevation", $("elevation").value);
+  try {
+    const s = await api(`/tracks/${$("sc-track").value}/scenarios?${q}`);
+    const a = s.assumptions;
+    const table = el("table", {}, el("tr", {}, el("th", {}, "Scenario"), el("th", { class: "num" }, "Speed"),
+      el("th", { class: "num" }, "Horizontal"), el("th", { class: "num" }, "Vertical"), el("th", { class: "num" }, "Moving"),
+      el("th", { class: "num" }, "Breaks + delay"), el("th", { class: "num" }, "Total")));
+    for (const sc of s.scenarios) {
+      const b = sc.breakdown_s;
+      table.append(el("tr", {}, el("td", { class: "estimated" }, sc.label), el("td", { class: "num" }, "×" + sc.speed_multiplier),
+        el("td", { class: "num" }, hm(b.horizontal)), el("td", { class: "num" }, hm(b.vertical)), el("td", { class: "num" }, hm(b.moving)),
+        el("td", { class: "num" }, hm(b.break + b.delay)), el("td", { class: "num estimated" }, hm(sc.estimated_duration_s))));
+    }
+    const parts = [
+      el("p", {}, `Method ${s.method.name} v${s.method.version}. Assumptions (${a.source}${a.label ? ": " + a.label : ""}): `
+        + `${a.horizontal_speed_m_h / 1000} km/h, ${a.ascent_rate_m_h} m/h up, ${a.descent_rate_m_h} m/h down, breaks ${hm(a.break_s)}. `
+        + `Inputs (calculated): ${km(s.inputs.distance_m)}, +${metres(s.inputs.ascent_m)}, −${metres(s.inputs.descent_m)}.`),
+      table,
+    ];
+    if (s.personal) {
+      const pp = s.personal;
+      parts.splice(1, 0, el("p", { class: "muted" }, `Fitted with model '${pp.model}' on ${pp.n_activities} activities, `
+        + `${pp.n_routes} routes (effort '${pp.effort}'); leave-one-route-out error median ${Math.round(100 * pp.loo_median_abs_error)} %. `
+        + `Faster/slower: ${pp.range_meaning}.`));
+    }
+    if (s.observed.length) {
+      parts.push(el("h3", { class: "observed" }, "Observed (recorded, not estimated)"));
+      parts.push(el("ul", { class: "notes" }, ...s.observed.map((o) => el("li", { class: "observed" },
+        `#${o.track_id} ${o.name || "(unnamed)"} (${o.relation}): moving ${hm(o.moving_time_s)}, elapsed ${hm(o.elapsed_time_s)}`
+        + (o.implied_speed_multiplier == null ? "" : ` — matches at ×${o.implied_speed_multiplier.toFixed(2)} speed on its own route (one activity, not a personal model)`)))));
+    }
+    parts.push(el("h3", {}, "Notes"), el("ul", { class: "notes" }, ...s.uncertainty_notes.map((n) => el("li", {}, n))),
+      seriesNote(s.elevation_series));
+    const eq = new URLSearchParams({ topic: "scenarios", elevation: $("elevation").value });
+    if (personal) eq.set("personal", "true");
+    if ($("sc-break").value !== "") eq.set("break_min", $("sc-break").value);
+    parts.push(explainBlock(`/tracks/${$("sc-track").value}/explanation`, eq, "Explain this estimate"));
+    out.replaceChildren(...parts);
+  } catch (e) { showError(out, e); }
+});
+
+// --- DEM elevation (ADR-012, ADR-013) -----------------------------------------------
+// One block per dataset: the elevation check if a profile is stored, otherwise
+// how to add one. Downloads (OpenTopography) need an explicit confirmation;
+// local datasets read tiles from this computer and send nothing.
+async function renderDem(id) {
+  const box = $("dem");
+  const item = tracks.find((i) => i.record.id === id);
+  if (!item) { box.replaceChildren(); return; }
+  const blocks = [];
+  for (const ds of demInfo.datasets) {
+    const block = el("div", {}, el("h3", {}, `${ds.name} (${ds.resolution_m} m ${ds.surface} model)`));
+    if (item.dem_datasets.includes(ds.id)) {
+      try {
+        block.append(...demCheck(await api(`/tracks/${id}/dem/${ds.id}`)),
+          explainBlock(`/tracks/${id}/explanation`, new URLSearchParams({ topic: "elevation", dataset: ds.id }), "Explain this check"));
+      }
+      catch (e) { block.append(el("p", { class: "error" }, String(e.message || e))); }
+    } else if (ds.source === "local") {
+      block.append(el("p", { class: "muted" }, `Not stored yet. Put ${ds.obtain} into data/local/dem/${ds.id}/, then:`),
+        el("div", { class: "row" }, button("Sample from local tiles", () => enrich(id, ds, block))));
+    } else if (demInfo.downloads_available) {
+      block.append(el("p", { class: "muted" }, "Not stored yet."),
+        el("div", { class: "row" }, button(`Download ${ds.name} elevation…`, () => enrich(id, ds, block))));
+    } else {
+      block.append(el("p", { class: "muted" }, "Not stored yet. Downloads are off: put OPENTOPOGRAPHY_API_KEY in .env and "
+        + `restart \`alpha serve\`, or run \`alpha enrich ${id} --dataset ${ds.id}\` in a terminal.`));
+    }
+    blocks.push(block);
+  }
+  box.replaceChildren(...blocks);
+}
+
+async function enrich(id, ds, block) {
+  if (ds.source !== "local") {
+    const ok = confirm(`Download ${ds.name} elevation from OpenTopography?\n\n`
+      + "Only fixed 0.25° map tiles around the track are requested (and cached on this computer); "
+      + "the track itself is never sent. Tiles already cached are not downloaded again.");
+    if (!ok) return;
+  }
+  block.append(el("p", { class: "muted" }, "Sampling elevation…"));
+  try {
+    await api(`/tracks/${id}/dem?dataset=${encodeURIComponent(ds.id)}`, { method: "POST" });
+    await loadTracks();
+    await showTrack(id);
+  } catch (e) { block.append(el("p", { class: "error" }, String(e.message || e))); }
+}
+
+function demCheck(d) {
+  const c = d.comparison;
+  const signedM = (v) => v == null ? "unknown" : (v >= 0 ? "+" : "−") + Math.abs(v).toFixed(1) + " m";
+  const rows = [
+    ["Ascent", metres(c.ascent_recorded_m), metres(c.ascent_dem_m)],
+    ["Descent", metres(c.descent_recorded_m), metres(c.descent_dem_m)],
+  ];
+  const table = el("table", {}, el("tr", {}, el("th", {}, ""), el("th", { class: "num" }, "recorded"), el("th", { class: "num" }, "DEM")),
+    ...rows.map(([label, a, b]) => el("tr", {}, el("td", {}, label), el("td", { class: "num" }, a), el("td", { class: "num" }, b))));
+  const diff = el("ul", { class: "notes" },
+    el("li", {}, `median difference (offset): ${signedM(c.median_difference_m)}`),
+    el("li", {}, `spread (std): ${metres(c.std_difference_m)}; 95 % within ± ${metres(c.p95_abs_difference_m)}`),
+    el("li", {}, `largest: ${metres(c.max_abs_difference_m)} at km ${c.max_abs_difference_at_m == null ? "?" : (c.max_abs_difference_at_m / 1000).toFixed(2)}`),
+    el("li", {}, `${c.compared_points} points compared, ${(100 * (c.reference_coverage || 0)).toFixed(0)} % with DEM`));
+  if (c.drift) {
+    const dr = c.drift;
+    diff.append(el("li", {}, `drift (smoothed over ${dr.window_m} m): ${signedM(dr.start_m)} at start, ${signedM(dr.end_m)} at end, `
+      + `range ${metres(dr.range_m)} (min ${signedM(dr.min_m)} at km ${(dr.min_at_m / 1000).toFixed(1)}, `
+      + `max ${signedM(dr.max_m)} at km ${(dr.max_at_m / 1000).toFixed(1)})`));
+  }
+  const warnings = el("ul", { class: "notes" }, ...d.warnings.map((w) => el("li", { class: "warn" }, `${w.code}: ${w.message}`
+    + (d.elevation_series.surface === "surface" ? " (against a surface model, forest can cause part of this)" : ""))));
+  const tiles = d.tiles.length > 6 ? `${d.tiles.slice(0, 6).join(", ")}, … (${d.tiles.length} tiles)` : d.tiles.join(", ");
+  return [table,
+    el("p", { class: "muted" }, "Recorded minus DEM (calculated). A surface model can include treetops; neither series is ground truth."),
+    diff,
+    warnings,
+    slopeSection(d),
+    el("p", { class: "muted" }, `Tiles ${tiles}, dated ${(d.elevation_series.retrieved_at_utc || "").slice(0, 10)}. `
+      + "Select this DEM above to analyse with its series."),
+    seriesNote(d.elevation_series)];
+}
+
+// Terrain slope: steepness of the ground around the track (ADR-015). It is
+// not the track gradient and not a hazard rating.
+function slopeSection(d) {
+  const box = el("div", {});
+  const s = d.terrain_slope;
+  if (!s) {
+    box.append(el("p", { class: "muted" }, `Terrain slope: unknown (${d.terrain_slope_note || "not stored"}).`));
+    return box;
+  }
+  const total = s.bands_m.reduce((a, b) => a + (b.distance_m || 0), 0) + (s.unknown_m || 0);
+  const table = el("table", {}, el("tr", {}, el("th", {}, "Terrain slope"), el("th", { class: "num" }, "Distance"), el("th", { class: "num" }, "Share")),
+    ...s.bands_m.map((b) => el("tr", {}, el("td", {}, `${b.band_deg}°`), el("td", { class: "num" }, km(b.distance_m)),
+      el("td", { class: "num" }, total > 0 ? `${Math.round(100 * b.distance_m / total)} %` : "–"))));
+  box.append(el("p", { class: "muted" }, `Terrain slope (calculated over ±${s.baseline_m} m): steepness of the ground around the track, `
+      + "not the track gradient and not a hazard rating."),
+    table,
+    el("p", { class: "muted" }, s.median_deg == null ? "" : `median ${Math.round(s.median_deg)}°, 90 % below ${Math.round(s.p90_deg)}°, `
+      + `steepest ${Math.round(s.max_deg)}° at km ${(s.max_at_m / 1000).toFixed(2)}`
+      + (s.unknown_m ? `; unknown on ${km(s.unknown_m)}` : "")));
+  return box;
+}
+
+// --- explanations (Phase 8, ADR-020) -----------------------------------------------
+// The template explanation appears at once. "Reword with local model" asks the
+// Ollama model on this computer; ALPHA shows its text only if every number
+// matches the report, otherwise the template with the reasons.
+function explainBlock(path, query, label) {
+  const box = el("div", { class: "explain" });
+  const out = el("div", {});
+  const load = async (llm) => {
+    const q = new URLSearchParams(query);
+    if (llm) q.set("llm", "true");
+    out.replaceChildren(el("p", { class: "muted" }, llm ? "Asking the local model (can take up to a minute)…" : "Loading…"));
+    try { renderExplanation(out, await api(`${path}?${q}`), () => load(true)); }
+    catch (e) { showError(out, e); }
+  };
+  box.append(el("div", { class: "row" }, button(label, () => load(false))), out);
+  return box;
+}
+
+function renderExplanation(out, x, reword) {
+  const parts = x.statements.map((st) => el("p", st.caveat ? { class: "muted" } : {}, st.text));
+  parts.push(el("p", { class: "muted" }, x.source === "model"
+    ? `Worded by the local model ${x.model}; every number was checked against ALPHA's report.`
+    : "Explained by ALPHA's templates."));
+  for (const r of x.fallback_reasons) parts.push(el("p", { class: "warn" }, `The model's text was not used: ${r}`));
+  for (const n of x.notes) parts.push(el("p", { class: "muted" }, `Note: ${n}`));
+  parts.push(el("p", { class: "muted" }, x.boundary));
+  if (x.source === "template") parts.push(el("div", { class: "row" }, button("Reword with local model", reword)));
+  out.replaceChildren(...parts);
+}
+
+$("bl-explain").addEventListener("click", () => {
+  const block = explainBlock("/baseline/explanation", new URLSearchParams({ elevation: $("elevation").value }), "Refresh");
+  $("bl-out").replaceChildren(block);
+  block.querySelector("button").click();
+});
+
+function fillElevationSelect() {
+  const select = $("elevation");
+  const previous = select.value;
+  select.replaceChildren(el("option", { value: "recorded" }, "recorded (from the GPX file)"),
+    ...demInfo.datasets.map((ds) => el("option", { value: `dem:${ds.id}` }, `DEM: ${ds.name} (tracks with it stored)`)));
+  if ([...select.options].some((o) => o.value === previous)) select.value = previous;
+}
+
+$("sc-source").addEventListener("change", () => {
+  const personal = $("sc-source").value === "personal";
+  for (const id of ["sc-h", "sc-up", "sc-down"]) $(id).disabled = personal;
+});
+$("elevation").addEventListener("change", () => { if (selected !== null) showTrack(selected); });
+api("/dem/datasets").then((info) => { demInfo = info; fillElevationSelect(); }).catch(() => {});
+loadTracks().catch((e) => showError($("tracks"), e));
+</script>
+</body>
+</html>

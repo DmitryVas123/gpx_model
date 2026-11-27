@@ -1,0 +1,9 @@
+{
+  "_comment": "Copy to data/local/references.json (git-ignored) and name your own files. Regression tests use these keys; a missing key or file skips its tests.",
+  "plan_1": "my-planned-route.gpx",
+  "plan_2": "another-planned-route.gpx",
+  "activity_a": "steep-ascent-recorded.gpx",
+  "activity_b": "long-loop-recorded.gpx",
+  "activity_c": "hike-c.gpx",
+  "activity_d": "forest-walk.gpx"
+}

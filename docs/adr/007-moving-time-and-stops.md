@@ -43,7 +43,7 @@ Every second of an activity is assigned to exactly one category, so
 Strava's moving time is an independent reference that the owner
 provided for both activities:
 
-| Method | Nebelhorn (Strava 148.4 min) | Gleitweg (Strava 301.5 min) |
+| Method | Activity A (Strava 148.4 min) | Activity B (Strava 301.5 min) |
 |---|---|---|
 | Rev. 1: stop radius 10 m / 60 s | 179 (+21 %) | 326 (+8 %) |
 | Speed > 0.3 m/s, 2D, 20 s window | 145 (−2 %) | 300 (−0.5 %) |
@@ -52,7 +52,7 @@ provided for both activities:
 | Speed > 0.3 m/s, 3D, 10 s / 30 s | 146 / 152 | 300 / 305 |
 
 The threshold matters most: ±0.05 m/s moves the result by about ±7 %
-(Nebelhorn) or ±3 % (Gleitweg). The window length matters little.
+(Activity A) or ±3 % (Activity B). The window length matters little.
 
 ### Revision 1 (superseded)
 

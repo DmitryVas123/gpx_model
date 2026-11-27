@@ -71,17 +71,17 @@ COP30 regression values did not change.
 
 | Track | Model | Median | 90 % below | Steepest | ≥ 30° |
 |---|---|---|---|---|---|
-| Gleitweg… | COP30 / DGM1 | 19° / 19° | 34° / 34° | 48° / 51° | 3.8 / 3.9 km |
-| Nebelhorn_push | COP30 / DGM1 | 18° / 20° | 35° / 37° | 53° / 49° | 1.5 / 1.8 km |
-| Lunch Hike | COP30 / DGM1 | 13° / 15° | 26° / 36° | 48° / 54° | 0.8 / 1.6 km |
-| Wanderung am Abend | COP30 / DGM1 | 13° / 10° | 35° / 34° | 48° / 51° | 3.2 / 3.0 km |
+| Activity B | COP30 / DGM1 | 19° / 19° | 34° / 34° | 48° / 51° | 3.8 / 3.9 km |
+| Activity A | COP30 / DGM1 | 18° / 20° | 35° / 37° | 53° / 49° | 1.5 / 1.8 km |
+| Activity C | COP30 / DGM1 | 13° / 15° | 26° / 36° | 48° / 54° | 0.8 / 1.6 km |
+| Activity D | COP30 / DGM1 | 13° / 10° | 35° / 34° | 48° / 51° | 3.2 / 3.0 km |
 
--   Above the treeline (Nebelhorn) both models agree within about 2°.
--   In forest (Wanderung) COP30's canopy roughness makes gentle ground
+-   Above the treeline (Activity A) both models agree within about 2°.
+-   In forest (Activity D) COP30's canopy roughness makes gentle ground
     look steeper (median 13° vs 10°). This is the same effect that adds
     gain (ADR-013).
 -   The 1 m model resolves short steep features that 30 m pixels smooth
-    out (Lunch Hike: 90th percentile 36° vs 26°).
+    out (Activity C: 90th percentile 36° vs 26°).
 -   With both models stored, prefer the terrain model (DGM1).
 
 ## Consequences

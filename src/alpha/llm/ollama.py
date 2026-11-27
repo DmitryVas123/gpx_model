@@ -67,20 +67,21 @@ class OllamaRewriter:
 
     def __call__(self, system: str, user: str) -> str:
         try:
-            return self._chat(system, user)
+            return self._chat(system, user, cpu=self.cpu_only)
         except _GpuError as exc:
             # A GPU/driver problem in Ollama, not in the request: the same
-            # model runs on the CPU, only slower.
-            self.cpu_only = True
+            # model runs on the CPU, only slower. Only this request falls
+            # back; the next one tries the GPU again, so a passing hiccup
+            # does not slow down every later explanation.
             self.notes.append(
                 f"Ollama's GPU backend failed ({exc}); ran on the CPU instead. "
                 "Updating the graphics driver usually fixes this."
             )
-            return self._chat(system, user)
+            return self._chat(system, user, cpu=True)
 
-    def _chat(self, system: str, user: str) -> str:
+    def _chat(self, system: str, user: str, *, cpu: bool) -> str:
         options: dict[str, float | int] = {"temperature": 0.2, "seed": 7}
-        if self.cpu_only:
+        if cpu:
             options["num_gpu"] = 0
         body = json.dumps(
             {
@@ -106,7 +107,7 @@ class OllamaRewriter:
                 raise RewriteError(
                     f"model '{self.model}' is not installed (ollama pull {self.model})"
                 ) from None
-            if "CUDA" in detail and not self.cpu_only:
+            if "CUDA" in detail and not cpu:
                 raise _GpuError("CUDA error") from None
             raise RewriteError(f"Ollama returned HTTP {exc.code}: {detail}") from None
         except (urllib.error.URLError, TimeoutError, OSError) as exc:

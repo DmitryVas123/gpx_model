@@ -48,7 +48,7 @@ from alpha.domain.scenarios import (
     din_assumptions,
 )
 from alpha.domain.track import Effort, ElevationSource, TrackKind
-from alpha.explain import TOPICS, explain
+from alpha.explain import LANGUAGES, TOPICS, explain
 from alpha.gpx.reader import GpxDocument, GpxReadError, read_gpx
 from alpha.llm import DEFAULT_MODEL, OllamaRewriter
 from alpha.modelling import EFFORT_SELECTIONS, BaselineParams
@@ -290,11 +290,19 @@ def _parser() -> argparse.ArgumentParser:
         help="let the local Ollama model reword it (checked against the report)",
     )
     sub.add_argument("--model", default=DEFAULT_MODEL, help="default %(default)s")
-    sub.add_argument("--language", default="English", help="with --llm")
+    sub.add_argument(
+        "--language",
+        default="English",
+        choices=LANGUAGES,
+        help="with --llm (only languages the checks cover)",
+    )
     sub.add_argument("--personal", action="store_true", help="scenarios: fitted speeds")
     sub.add_argument("--break-min", type=float, default=0.0, help="scenarios")
     sub.add_argument(
-        "--dataset", default="BY_DGM1", choices=sorted(DATASETS), help="elevation"
+        "--dataset",
+        default=DEFAULT_DATASET,
+        choices=sorted(DATASETS),
+        help="elevation (default %(default)s, as for enrich)",
     )
     sub.add_argument(
         "--effort",

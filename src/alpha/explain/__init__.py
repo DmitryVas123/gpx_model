@@ -7,6 +7,7 @@ by the caller as a function.
 """
 
 from alpha.explain.explain import (
+    LANGUAGES,
     SYSTEM_PROMPT,
     Explanation,
     Rewrite,
@@ -18,6 +19,7 @@ from alpha.explain.templates import BOUNDARY, TOPICS, Statement
 
 __all__ = [
     "BOUNDARY",
+    "LANGUAGES",
     "SYSTEM_PROMPT",
     "TOPICS",
     "Explanation",

@@ -46,10 +46,10 @@ missing data must never be hidden by a preset.
 
 ## Evidence (seven activities, 2026-11-24)
 
-The three new activities were
--   in Oytal (Bavaria),
--   near Riezlern (Austria, no DGM1), and
--   at Chiusi (Italy, flat, no DGM1).
+The three new activities:
+-   Activity E, in Bavaria;
+-   Activity F, partly outside Bavaria, so with no full DGM1;
+-   Activity G, flat and outside Bavaria, with no DGM1.
 
 All five normal-effort routes have recorded elevation, so the fit uses
 it.
@@ -60,16 +60,16 @@ it.
 | COP30 | ×1.59 | ×1.16–2.19 | 7 % / 20 % |
 
 Model 2 is still gated (5 of 8 routes). The route mix is now wide: `v / h`
-runs from 0.02 (Chiusi) to 1.19, a range of ×50. An inspection-only
+runs from 0.02 (Activity G) to 1.19, a range of ×50. An inspection-only
 preview with the gate at 5 gives:
 
 -   flat ×1.30 (1.08–1.57) and vertical ×2.12 (1.18–3.80);
 -   LOO median 4 %, max 9 %;
--   hard efforts against model 2: Gleitweg +9 %, Nebelhorn +20 %. Against
-    model 1 they are +21 % and +56 %, so most of Nebelhorn's speed was
+-   hard efforts against model 2: Activity B +9 %, Activity A +20 %. Against
+    model 1 they are +21 % and +56 %, so most of Activity A's speed was
     terrain, not effort.
 
-Nebelhorn_push estimated with the personal speeds (hard effort, not in
+Activity A estimated with the personal speeds (hard effort, not in
 the fit): baseline 3:53 h moving, range 2:59–5:03 h; observed 2:29 h,
 ×1.56 faster than the normal-effort fit.
 

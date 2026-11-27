@@ -409,3 +409,25 @@ def test_a_right_number_with_the_wrong_meaning_is_rejected(data: str) -> None:
     assert base.facts is not None
     pairs = [(s.text, s.facts) for s in base.statements]
     assert not citation_problems(pairs, base.facts, pairs)
+
+
+def test_cpu_fallback_is_per_request(monkeypatch: pytest.MonkeyPatch) -> None:
+    bodies: list[dict[str, Any]] = []
+    failures = iter([True, False])  # the GPU fails once, then works
+
+    def urlopen(request: Any, timeout: float) -> FakeResponse:
+        body = json.loads(request.data)
+        bodies.append(body)
+        if "num_gpu" not in body["options"] and next(failures):
+            raise urllib.error.HTTPError(
+                request.full_url, 500, "error", Message(), io.BytesIO(b"CUDA error")
+            )
+        content = json.dumps({"statements": [{"text": "ok", "facts": []}]})
+        return FakeResponse(json.dumps({"message": {"content": content}}).encode())
+
+    monkeypatch.setattr("urllib.request.urlopen", urlopen)
+    rewriter = OllamaRewriter()
+    rewriter("sys", "first")  # GPU fails -> CPU
+    rewriter("sys", "second")  # tries the GPU again
+    assert [("num_gpu" in b["options"]) for b in bodies] == [False, True, False]
+    assert len(rewriter.notes) == 1

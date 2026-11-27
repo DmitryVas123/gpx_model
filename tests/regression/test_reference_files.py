@@ -4,30 +4,20 @@ Personal activities live in data/local/ (git-ignored); their tests are skipped
 when the files are absent, e.g. on a fresh clone.
 """
 
-from pathlib import Path
-
 import pytest
 
 from alpha.domain.quality import WarningCode, check_track
 from alpha.domain.track import ElevationSource, TrackKind
 from alpha.gpx.reader import read_gpx
-
-DATA = Path(__file__).resolve().parents[2] / "data"
-
-
-def load(relative: str) -> Path:
-    path = DATA / relative
-    if not path.exists():
-        pytest.skip(f"{relative} not present (personal data is not in Git)")
-    return path
+from tests.references import reference
 
 
 @pytest.mark.parametrize(
-    ("relative", "points"),
-    [("samples/input.gpx", 531), ("samples/input2.gpx", 374)],
+    ("key", "points"),
+    [("plan_1", 531), ("plan_2", 374)],
 )
-def test_planned_routes(relative: str, points: int) -> None:
-    doc = read_gpx(load(relative).read_bytes())
+def test_planned_routes(key: str, points: int) -> None:
+    doc = read_gpx(reference(key).read_bytes())
     (source,) = doc.tracks
     t = source.track
     assert t.point_count == points
@@ -39,14 +29,14 @@ def test_planned_routes(relative: str, points: int) -> None:
 
 
 @pytest.mark.parametrize(
-    ("relative", "points", "gaps", "jumps"),
+    ("key", "points", "gaps", "jumps"),
     [
-        ("local/Nebelhorn_push.gpx", 13_473, 1, 3),
-        ("local/Gleitweg_Seealpsee_Zeigersattel.gpx", 24_827, 3, 14),
+        ("activity_a", 13_473, 1, 3),
+        ("activity_b", 24_827, 3, 14),
     ],
 )
-def test_recorded_activities(relative: str, points: int, gaps: int, jumps: int) -> None:
-    doc = read_gpx(load(relative).read_bytes())
+def test_recorded_activities(key: str, points: int, gaps: int, jumps: int) -> None:
+    doc = read_gpx(reference(key).read_bytes())
     (source,) = doc.tracks
     t = source.track
     assert t.point_count == points

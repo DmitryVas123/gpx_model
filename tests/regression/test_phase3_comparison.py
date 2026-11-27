@@ -1,20 +1,21 @@
-"""Phase 3 exit criterion: compare the planned Nebelhorn route (input.gpx) with
-the recorded Nebelhorn_push activity (same summit, different path)."""
+"""Phase 3 exit criterion: compare a planned route (plan_1) with an activity
+to the same summit on a different path (activity_a)."""
 
 from pathlib import Path
 
 import pytest
 
 from alpha.application.tracks import Workspace, compare_tracks, edit_track, import_file
+from tests.references import reference_path
 
 ROOT = Path(__file__).resolve().parents[2]
-PLAN = ROOT / "data/samples/input.gpx"
-ACTIVITY = ROOT / "data/local/Nebelhorn_push.gpx"
+PLAN = reference_path("plan_1")
+ACTIVITY = reference_path("activity_a")
 
 
 def test_plan_versus_activity(tmp_path: Path) -> None:
-    if not ACTIVITY.exists():
-        pytest.skip("Nebelhorn_push.gpx not present (personal data is not in Git)")
+    if ACTIVITY is None or PLAN is None:
+        pytest.skip("plan_1 or activity_a not available (personal data)")
     ws = Workspace(tmp_path)
     try:
         plan = import_file(ws, PLAN.name, PLAN.read_bytes()).tracks[0].id

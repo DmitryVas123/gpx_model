@@ -1,5 +1,21 @@
 # ALPHA --- Data Model and Contracts
 
+This document is authoritative for names, units, formulas, defaults,
+report formats, and tables. When the code and this document disagree,
+the code wins, and this document is corrected (CLAUDE.md).
+
+| Section | Contents |
+|---|---|
+| §1–3 | Principles, glossary, reference data |
+| §4 | Domain types (`Track`, enums, warnings) |
+| §5 | Metric definitions: distance, elevation, profile, time, climbs, DEM elevation, terrain slope |
+| §6 | Analysis contract and report formats |
+| §7 | Comparison, scenarios, personal speeds, effort, explanations |
+| §8–9 | Data quality, provenance |
+| §10 | Database tables |
+
+Current versions: algorithm `0.3.0`, report format `11`, schema `4`.
+
 ## 1. Modelling principles
 
 -   Store the original GPX bytes unchanged; everything else is derived
@@ -41,21 +57,32 @@ in `data/local/` (git-ignored); see ARCHITECTURE.md §10.
 
 | File | Kind | Creator | Points | Spacing (median) | Time | Elevation | Raw step sum | Notes |
 |---|---|---|---|---|---|---|---|---|
-| `input.gpx` | planned | mapy.com | 531 | 9.5 m | none | integer m, terrain model | 6.80 km | Nebelhorn ascent; 45 steps above 45 % step gradient (max 414 %) caused by 1 m rounding over sub-metre steps |
-| `input2.gpx` | planned | mapy.com | 374 | 14.9 m | none | integer m, terrain model | 6.73 km | |
-| `Nebelhorn_push.gpx` | activity | StravaGPX | 13,473 | 0.6 m | 1 Hz | 0.1 m, likely barometric | 9.91 km | Same summit as `input.gpx`, different path; 4,539 zero-length steps (stopped) |
-| `Gleitweg_Seealpsee_Zeigersattel.gpx` | activity | StravaGPX | 24,827 | 1.0 m | 1 Hz | 0.1 m, likely barometric | 23.64 km | Recording gaps up to 819 s; isolated steps up to 11.6 m/s (GPS jumps) |
+| Plan 1 | planned | mapy.com | 531 | 9.5 m | none | integer m, terrain model | 6.80 km | The same climb as Activity A; 45 steps above 45 % step gradient (max 414 %) caused by 1 m rounding over sub-metre steps |
+| Plan 2 | planned | mapy.com | 374 | 14.9 m | none | integer m, terrain model | 6.73 km | |
+| Activity A | activity | StravaGPX | 13,473 | 0.6 m | 1 Hz | 0.1 m, likely barometric | 9.91 km | Same summit as Plan 1, different path; 4,539 zero-length steps (stopped) |
+| Activity B | activity | StravaGPX | 24,827 | 1.0 m | 1 Hz | 0.1 m, likely barometric | 23.64 km | Recording gaps up to 819 s; isolated steps up to 11.6 m/s (GPS jumps) |
+| Activity C | activity | StravaGPX | 13,625 | 0.9 m | 1 Hz | 0.1 m | 11.38 km | |
+| Activity D | activity | StravaGPX | 24,038 | 0.8 m | 1 Hz | 0.1 m | 20.00 km | Mostly forest: COP30 adds 28 % ascent over DGM1 (ADR-013) |
+| Activity E | activity | StravaGPX | 14,998 | 1.0 m | 1 Hz | 0.1 m | 15.71 km | |
+| Activity F | activity | StravaGPX | 15,195 | 0.8 m | 1 Hz | 0.1 m | 11.64 km | One-way route; half outside Bavaria (no full DGM1) |
+| Activity G | activity | StravaGPX | 8,163 | 1.2 m | 1 Hz | 0.1 m | 10.77 km | Flat (249–260 m); outside DGM1 |
+
+All of these files are personal and live in `data/local/` (git-ignored),
+including the planned routes. The user marked Activity A and
+Activity B as hard efforts (ADR-018); the others are normal hikes.
 
 Independent reference values reported by Strava for the two activities
 (provided by the owner), used to calibrate ADR-007 and ADR-010:
 
 | Activity | Distance | Moving time | Elapsed time | Elevation gain |
 |---|---|---|---|---|
-| Nebelhorn_push | 8.30 km | 2:28:22 | 3:55:01 | 1,443 m |
-| Gleitweg, Seealpsee, Zeigersattel | 20.8 km | 5:01:29 | 7:26:22 | 1,309 m |
+| Activity A | 8.30 km | 2:28:22 | 3:55:01 | 1,443 m |
+| Activity B | 20.8 km | 5:01:29 | 7:26:22 | 1,309 m |
 
-ALPHA 0.2.0 gives 8.33 km / 2:29 and 20.86 km / 5:04. Strava's gain is
-not reproducible from the exported elevation (ADR-004).
+ALPHA (algorithm 0.2.0 and later) gives 8.33 km / 2:29 and
+20.86 km / 5:04. Strava's gain is not reproducible from the exported
+elevation (ADR-004). It equals Copernicus DEM elevation sampled every
+20 m: 1441 m and 1311 m (ADR-012).
 
 Consequences:
 
@@ -115,13 +142,23 @@ class Track:
     time_utc_s: npt.NDArray[np.float64]   # POSIX seconds; NaN where missing
     source_segment: npt.NDArray[np.int32] # index of <trkseg>; 0 for <rte>
 
+class Effort(StrEnum):            # set by the user only, never inferred (ADR-018)
+    EASY = "easy"
+    NORMAL = "normal"
+    HARD = "hard"
+
 @dataclass(frozen=True)
 class QualityWarning:
-    code: str                    # see §8
+    code: WarningCode            # see §8
     message: str
     point_indices: tuple[int, ...] = ()
     count: int | None = None
+    bin_indices: tuple[int, ...] = ()   # profile bins (analysis warnings only)
 ```
+
+Effort is a property of a stored activity, not of the GPX. It lives in
+the `track_annotations` table (§10) and on `TrackRecord.effort`, not on
+`Track`.
 
 Kind and elevation-source heuristics (always overridable by the user and
 recorded as `HEURISTIC`):
@@ -189,7 +226,7 @@ the reference data in §3.
     `gradient_outlier_percent` (default 100 %) raise `GRADIENT_OUTLIER`
     with their bin indices; values are not altered.
 -   This is a track-derived gradient, not the slope of the surrounding
-    terrain.
+    terrain; that is terrain slope (§5.8).
 
 ### 5.4 Time (activities only, ADR-007)
 
@@ -241,11 +278,17 @@ band plus `unknown`, so tracks are comparable:
 
 ### 5.7 Reference elevation from a DEM (ADR-012, ADR-013)
 
--   Datasets: `COP30` (Copernicus GLO-30, 30 m surface model, downloaded
-    via OpenTopography) and `BY_DGM1` (Bavaria, 1 m terrain model, read
-    from GeoTIFF tiles the user puts in `<data dir>/dem/BY_DGM1/`; never
-    downloaded). Local tiles are read in their own CRS; points outside
-    every tile are `NaN`.
+-   Datasets:
+    -   `COP30`: Copernicus GLO-30, a 30 m **surface** model (includes
+        treetops), downloaded via OpenTopography in fixed 0.25° tiles.
+    -   `BY_DGM1`: Bavaria, a 1 m **terrain** model (bare ground), read
+        from GeoTIFF tiles in `<data dir>/dem/BY_DGM1/`. The tiles are
+        placed there by hand or downloaded from the portal's metalink
+        with `alpha get-tiles` (ADR-013).
+
+    Local tiles are read in their own CRS. Points outside every tile
+    are `NaN`; a partly covered track has no DEM ascent rather than a
+    partial one.
 
 -   A DEM is sampled at **knots** about `20 m` apart along the track
     (per source segment: first point, displacement-filter points at
@@ -253,7 +296,7 @@ band plus `unknown`, so tracks are comparable:
     knots are interpolated linearly along the path, giving one value per
     point (`NaN` where the DEM has no data).
 -   Sampling at every 1 Hz point is wrong: lateral GPS jitter on a slope
-    becomes vertical noise (Nebelhorn_push DEM gain 1862 m at 1 Hz vs
+    becomes vertical noise (Activity A DEM gain 1862 m at 1 Hz vs
     1441 m at 20 m).
 -   Stored per track and dataset with provenance: dataset, resolution,
     surface/terrain model, vertical datum, attribution, spacing, tiles,
@@ -292,7 +335,7 @@ band plus `unknown`, so tracks are comparable:
     track; NaN where any probe lacks data.
 -   It measures the steepness of the **ground around** the track,
     independent of the direction of travel. It is **not** the track
-    gradient (§5.4) and not a hazard rating.
+    gradient (§5.3) and not a hazard rating.
 -   Summary (`TerrainSlopeSummary`), distance-weighted on the filtered
     distance (each step counts with the slope at its end):
     -   distance per band `<10`, `10-20`, `20-30`, `30-40`, `40-50`,
@@ -379,9 +422,22 @@ Two analyses are comparable only if `algorithm_version` and
 `params_hash` match. The comparison use case recomputes when they do
 not.
 
-### 6.1 Report format (`alpha.report`, `alpha analyse --json`)
+### 6.1 Report formats (`alpha.report`)
 
-JSON with `format_version: "11"`:
+Every JSON output is built in `alpha.report` and is identical from the
+CLI (`--json`) and the API. Each report carries `format_version`
+(currently `"11"`).
+
+| Report | CLI | API | Contents |
+|---|---|---|---|
+| File / track analysis | `alpha analyse FILE --json`, `alpha show ID --json` | `GET /tracks/{id}` | below |
+| Comparison | `alpha compare A B --json` | `GET /comparisons` | §7.1 |
+| Scenarios | `alpha scenarios ID --json` | `GET /tracks/{id}/scenarios` | §7.2, §7.6 |
+| Elevation check | `alpha enrich ID --json` | `GET`/`POST /tracks/{id}/dem…` | §5.7, §5.8 |
+| Baseline | `alpha baseline --json` | `GET /baseline` | §7.3–7.5 |
+| Explanation | `alpha explain … --json` | `GET …/explanation` | §7.7 |
+
+Format history:
 
 -   2 added `distance_raw_m` and renamed `distance_in_stops_m` to
     `distance_while_stopped_m`.
@@ -571,7 +627,11 @@ class ScenarioResult:
 
 -   Always: what the estimate does not include.
 -   For a preset: that the values are not personal.
--   For a range: that it reflects pace only.
+-   For fitted assumptions: that they come from the user's activities and
+    describe how the user walked then (§7.6 adds what the fit rests on).
+-   For a range of preset or user speeds: that it reflects pace only.
+    For fitted speeds with their own range: that it is the user's
+    variation between hikes.
 -   With 0 breaks: that no breaks are included.
 -   When the route has distance steeper than 25 %: that steepness beyond
     total ascent and descent is not modelled.
@@ -601,18 +661,26 @@ class ActivitySample:          # one eligible activity, one elevation series
     group: int                 # route group: linked plan's ID, else own ID
     name: str | None
     started_at_utc: datetime | None
-    distance_m: float          # jitter-filtered 2D distance (§5.2)
+    distance_m: float          # jitter-filtered 2D distance (§5.1)
     ascent_m: float
     descent_m: float
     moving_time_s: float       # > 0
+    effort: Effort | None = None
 
 @dataclass(frozen=True)
 class BaselineParams:
-    min_groups: int = 5                     # distinct routes before fitting
+    min_groups: int = 5                     # model 1: distinct routes before fitting
     min_moving_s: float = 1800.0
     activity_types: tuple[str, ...] = ("hiking", "walking")
     reference: DinAssumptions = DIN_33466_STANDARD
+    split_min_groups: int = 8               # model 2 (§7.4)
+    split_min_ratio_range: float = 1.5      # model 2 (§7.4)
+    effort: str = "normal"                  # normal | hard | easy | all (§7.5)
 ```
+
+These are not analysis parameters: they do not change any analysis and
+are not part of `params_hash`. The baseline is fitted with the same
+`AnalysisParams` as the request (for example the same elevation series).
 
 -   Per activity (observed ratio):
     `k_i = DIN moving time(reference) / moving_time_s`.
@@ -633,7 +701,7 @@ class BaselineParams:
     < `min_moving_s`, ascent unknown, or the requested DEM series not
     stored.
 -   JSON: `alpha.report.baseline_report` (`alpha baseline --json`,
-    report format 8, `models.multiplier`).
+    `GET /baseline`), under `models.multiplier`.
 
 ### 7.4 Flat and vertical factors (ADR-017)
 
@@ -733,7 +801,21 @@ class BaselineParams:
     -   at least as many statements as the draft (without caveats);
     -   per statement, every cited numeric fact must be stated, and every
         number must belong to a cited fact or be template wording;
-    -   every numeric fact of the draft must reappear.
+    -   every numeric fact of the draft must reappear;
+    -   guards against adversarial text (`alpha.explain.guards`):
+        -   a number with a unit must match a fact of that unit, within
+            the precision it is written with;
+        -   no spelled-out quantities;
+        -   numbers next to words of their own meaning (anchors);
+        -   no advice, suitability, conditions, certainty, links,
+            markup, or instructions;
+        -   "measured" / "recorded" only for observed or calculated
+            values.
+
+        Words the template itself uses are allowed.
+-   `language` must be one of `LANGUAGES` (`English`, `German`): the
+    languages the word lists cover. The value enters the prompt, so free
+    text is refused (CLI choices, API 422).
 -   JSON: `alpha.report.explanation_report`: `topic`, `source`, `model`,
     `statements[{text, facts, caveat}]`, `boundary`, `fallback_reasons`,
     `notes`,
@@ -807,8 +889,11 @@ Used consistently in code, API, and UI (matching PROJECT_VISION.md):
     elevation.
 -   **Calculated:** deterministically derived: distance, ascent,
     gradient, moving time.
--   **Estimated:** produced by a model with assumptions: scenario
+-   **Estimated:** produced by a method with assumptions: scenario
     durations.
+-   **Fitted:** derived from the user's own activities by
+    `alpha.modelling`: personal speeds, their ranges and errors. Always
+    reported with the number of activities and routes it rests on.
 -   **Unknown:** not available or not inferable: e.g. moving time of a
     planned route. Represented as `None`, never zero.
 
@@ -825,8 +910,15 @@ meta (schema_version)
 source_files 1 ── * tracks 1 ── * track_points
                     tracks 1 ── * analyses 1 ── * profile_bins
                                  analyses 1 ── * climb_sections
+                    tracks 1 ── * dem_profiles        (one per dataset)
+                    tracks 1 ── * terrain_slopes      (one per dataset)
+                    tracks 1 ── 0..1 track_annotations
                     tracks (activity) * ── 0..1 tracks (planned)   via planned_track_id
 ```
+
+Schema history: 1 (Phase 3); 2 added `dem_profiles`; 3 added
+`terrain_slopes`; 4 added `track_annotations`. Each upgrade only adds
+tables and runs automatically on first use (ADR-002).
 
 ### `source_files`
 
@@ -886,19 +978,19 @@ user edits the track's kind or elevation source.
 -   `elevation_blob`: one float64 (little-endian) per track point; NaN =
     no data
 
-### `track_annotations` (schema 4; ADR-018)
-
--   `track_id` (primary key, cascade), `effort` (`easy` | `normal` |
-    `hard` | null), `updated_at_utc`
--   User annotations that the GPX does not contain; set only by
-    `alpha edit` / `PATCH`, never inferred.
-
 ### `terrain_slopes` (schema 3, unique `track_id, dataset_id`; ADR-015)
 
 -   `track_id` (cascade), `dataset_id`, `baseline_m`, `sample_spacing_m`,
     `created_at_utc`, `point_count`
 -   `slope_blob`: one float64 (little-endian) per track point, degrees;
     NaN = unknown
+
+### `track_annotations` (schema 4; ADR-018)
+
+-   `track_id` (primary key, cascade), `effort` (`easy` | `normal` |
+    `hard` | null), `updated_at_utc`
+-   User annotations that the GPX does not contain; set only by
+    `alpha edit` / `PATCH`, never inferred.
 
 DEM tiles themselves are cached as files in `<data dir>/dem/<dataset>/`
 with a JSON sidecar (bounds, retrieval time). Local tiles (`BY_DGM1`) are

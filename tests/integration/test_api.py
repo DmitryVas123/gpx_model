@@ -79,7 +79,7 @@ def test_unreadable_upload(client: TestClient) -> None:
 
 
 def test_too_large_upload(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("alpha.api.app.DEFAULT_MAX_BYTES", 10)
+    monkeypatch.setattr("alpha.api.routers.tracks.DEFAULT_MAX_BYTES", 10)
     response = client.post("/files", content=ROUTE)
     assert response.status_code == 413
     assert error_code(response) == "FILE_TOO_LARGE"
@@ -230,3 +230,10 @@ def test_end_to_end_flow(client: TestClient) -> None:
     assert client.get("/comparisons", params={"a": plan, "b": act}).status_code == 200
     scenarios = client.get(f"/tracks/{plan}/scenarios").json()
     assert scenarios["observed"][0]["track_id"] == act
+
+
+def test_api_context_never_shows_the_key(tmp_path: Path) -> None:
+    with TestClient(create_app(tmp_path, dem_api_key="secret-key")) as client:
+        context = client.app.state.context  # type: ignore[attr-defined]
+        assert context.dem_downloads_available
+        assert "secret-key" not in repr(context)

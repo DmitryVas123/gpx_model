@@ -6,7 +6,7 @@
 
 ## Context
 
-Point-to-point gradient is dominated by noise. On `input.gpx`, 1 m
+Point-to-point gradient is dominated by noise. On Plan 1, 1 m
 elevation rounding over sub-metre steps produced 45 steps above 45 % and
 a maximum of 414 %. The exploration script clipped gradient to ±45 %,
 which hid both the artifacts and the genuinely steep upper section of the
@@ -38,7 +38,7 @@ route.
 
 ## Evidence
 
-Steepest bin and count of bins ≥ 40 % on `input.gpx`:
+Steepest bin and count of bins ≥ 40 % on Plan 1:
 
 | Bin length | Max gradient | Bins ≥ 40 % |
 |---|---|---|

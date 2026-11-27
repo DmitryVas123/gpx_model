@@ -1,365 +1,226 @@
-# ALPHA --- MVP and Development Roadmap
+# ALPHA --- Roadmap and Status
 
 ## Delivery strategy
 
-Build a tested analysis core before any infrastructure. React, LLMs,
-Redis, PostGIS, and ML are out of scope until the MVP works end to end.
+-   Build a tested, deterministic analysis core first; add storage,
+    interfaces, models, and AI only on top of it, one phase at a time.
+-   Phase exit criteria matter more than dates. A phase is done when its
+    criteria are met and documented, not when its task list is empty.
+-   Infrastructure waits for a measured need (Phase 9).
 
-Phase exit criteria matter more than dates.
+## Current state (2026-11-24)
 
-## Current state (2026-11-22)
+| Phase | Status | Delivered | ADRs |
+|---|---|---|---|
+| 0 Foundation | ✅ | Package, tooling, `.gitignore`, architecture tests | 001, 008 |
+| 1 GPX reading and quality | ✅ | `Track`, GPX reader (`<trk>`, `<rte>`, encodings), heuristics, quality warnings, `alpha inspect` | 008 |
+| 2 Deterministic analysis | ✅ | Distance, ascent, profile bins, time metrics, climb sections, versioned `analyse()`, JSON report, `alpha analyse` | 004, 007, 009, 010 |
+| 3 Persistence and comparison | ✅ | SQLite, original files by hash, cached analyses, `import/list/show/edit/delete`, `compare` | 002 |
+| 4 Scenario engine | ✅ | DIN 33466 method registry, assumptions with source, ranges, observed times | 005 |
+| 5 API and minimal UI | ✅ | FastAPI, error format, request log, local page, `alpha serve` (**MVP complete**) | 011 |
+| 6 Terrain enrichment | ✅ | Copernicus GLO-30 and Bavaria DGM1, analysis on DEM elevation, elevation check, drift warning, terrain slope | 012–015 |
+| 7 Personal performance baseline | ✅ | `alpha.modelling`: speed multiplier and flat/vertical factors, route-grouped validation, effort annotation, `--personal` scenarios | 016–019 |
+| 8 AI explanation layer | ✅ | Template explanations; local Ollama model rewording with validation; CLI, API, page | 020 |
+| 9 Platform | not started | Map UI, background work, deployment: only when use justifies it | — |
 
--   **Phase 0 done.** Package skeleton (`src/alpha/domain`,
-    `src/alpha/gpx`), `pyproject.toml`, `.gitignore`, ruff/mypy/pytest
-    configured, architecture tests enforce the import rules, ADR-001 and
-    ADR-008 written.
--   **Phase 1 done.** `Track` and enums (`domain/track.py`), WGS84 step
-    distances with segment mask (`domain/geodesy.py`, pulled forward
-    from Phase 2 because quality checks need it), kind/elevation-source
-    heuristics (`domain/classify.py`), quality checks
-    (`domain/quality.py`), GPX reader for `<trk>` and `<rte>` with
-    encoding detection (`gpx/reader.py`), and `alpha inspect FILE`.
-    93 tests; all four reference files meet the exit criteria.
--   **Phase 2 done.** Hysteresis ascent/descent (`domain/elevation.py`,
-    ADR-004), profile bins, gradient, and gradient distribution
-    (`domain/profile.py`, ADR-009), elapsed/moving/stopped/gap time
-    (`domain/timing.py`, ADR-007), climb sections (`domain/climbs.py`),
-    `analyse()` with `ALGORITHM_VERSION` and `params_hash`
-    (`domain/analysis.py`), the JSON report (`report.py`), and
-    `alpha analyse FILE [--json] [--profile-bin-m ...]`.
--   **Calibration (algorithm 0.2.0).** Strava's values for both
-    activities exposed a +14–20 % distance bias from 1 Hz GPS jitter and
-    a +8–21 % moving-time bias. A 3 m minimum-displacement distance
-    filter (ADR-010) and a 3D windowed-speed moving rule (ADR-007 rev. 2)
-    now match Strava within 0.3 % (distance) and 1 % (moving time).
-    Strava's elevation gain cannot be reproduced from exported data
-    (ADR-004).
--   **Phase 3 done.** SQLite storage with original files kept by SHA-256
-    (`persistence/`, ADR-002), use cases (`application/tracks.py`),
-    comparison (`domain/comparison.py`), and the CLI commands `import`,
-    `list`, `show`, `compare`, `edit` (kind, elevation source, link to
-    plan), `delete --yes`. The CLI is now a package (`cli/app.py`,
-    `cli/render.py`). 344 tests, including persistence round trips,
-    rollback, restart, architecture rules, and the exit-criterion
-    comparison of `input.gpx` with `Nebelhorn_push.gpx`.
--   **Phase 4 done.** Scenario method registry with DIN 33466
-    (`domain/scenarios.py`), assumptions with source (user / preset;
-    `fitted` reserved for Phase 7), speed-multiplier range, breakdown and
-    uncertainty notes. `alpha scenarios ID` shows observed times of the
-    track itself or of linked activities, each with an implied speed
-    multiplier (`application/scenarios.py`, ADR-005). Scenarios are not
-    stored. 378 tests, including monotonicity invariants and the exit
-    criterion on `input.gpx` + `Nebelhorn_push.gpx`.
--   **Phase 5 done — MVP complete.** FastAPI app in `alpha/api/` (routes
-    call use cases only; Pydantic schemas validate `alpha.report` output
-    with `extra="forbid"`), uniform error format, one JSON log line per
-    request without personal data, local page at `/` (plain JS, inline SVG
-    profile, compare, scenarios, edit/link; no external resources), and
-    `alpha serve` on 127.0.0.1 (ADR-011). 432 tests, including the
-    end-to-end API flow and checks that the page never uses `innerHTML`
-    and loads nothing from the internet. The page itself was checked for
-    JavaScript syntax but not yet rendered in a browser by the assistant.
--   **Phase 6 done (terrain enrichment, ADR-012 to ADR-015).**
-    -   COP30 surface model via OpenTopography: opt-in, fixed 0.25° tiles,
-        local cache, tile margins reused at edges.
-    -   Bavaria DGM1 terrain model from local GeoTIFF tiles. Downloaded
-        from the portal's metalink with `alpha get-tiles` (all tiles, or
-        `--for-tracks`), each tile verified.
-    -   Profiles sampled every 20 m with provenance and attribution
-        (schema 3, additive upgrades).
-    -   Analyses can run on any stored series (`--elevation dem:<id>`,
-        algorithm 0.3.0).
-    -   The elevation check covers offset, spread, drift
-        (`ELEVATION_DRIFT`), and terrain slope by 10° band. It is
-        available in the CLI (also `--all`), the API, and the page, with
-        downloads only after explicit confirmation. Report format 6.
-    -   Findings on four activities:
-        -   Strava's gain equals COP30 sampled every 20 m.
-        -   COP30 overstates gain in forest by 0–28 % against the terrain
-            model (+235 m on Wanderung am Abend).
-        -   The Nebelhorn barometer drifted by −40 m.
-        -   The drift threshold of 20 m separates cleanly against the
-            terrain model, but not against COP30 in forest.
-    -   604 tests.
--   `scripts/explore.py` (former `main.py`): plotting sandbox only. Every
-    known issue in its calculations is solved in the package (segment
-    boundaries, spacing-independent windows, no clipping, timestamps,
-    `<rte>`, encodings). Its numbers are not authoritative.
--   Reference data: two planned routes (mapy.com) in `data/samples/`
-    and four recorded activities (Strava) in `data/local/`, with DGM1
-    tiles for them; see
-    DATA_MODEL.md §3.
--   Open questions (owner's input needed):
-    -   confirm that mapy.com exports may be shared publicly; otherwise
-        move them to `data/local/` (their golden files move with them);
-    -   `.idea/` is ignored now but still tracked from earlier commits
-        (`git rm -r --cached .idea` untracks it);
-    -   more calibration data: the distance and moving-time rules fit two
-        activities from one device. Strava values for a few more
-        (different terrain, ideally another device) would show whether
-        they generalise.
+Versions: algorithm `0.3.0`, report format `11`, database schema `4`.
+The test suite has about 750 tests, including architecture rules and
+golden outputs.
 
-------------------------------------------------------------------------
+Reference data:
+-   two planned routes (mapy.com) and seven recorded activities
+    (Strava), all in `data/local/`, as no real GPX is shared. Five
+    activities are normal effort and two are marked hard;
+-   COP30 for all of them and DGM1 for the Bavarian ones
+    (DATA_MODEL.md §3).
 
-## Phase 0 --- Foundation
+## Open items
 
-### Tasks
+### Needs data or the owner's input
 
--   `pyproject.toml`, `src/alpha/`, virtual environment.
--   Ruff, pytest, mypy or pyright; a single `make check`-style command.
--   `.gitignore`: `data/local/`, `*.db`, `.env`, `.idea/`, `__pycache__/`.
--   Move personal Strava files to `data/local/`. Move planned routes to
-    `data/samples/` if their export licence permits; otherwise also
-    `data/local/`.
--   Move `main.py` to `scripts/explore.py` as the exploration sandbox.
--   ADR-001, ADR-008.
+-   **More normal-effort routes.** Three more activate the flat/vertical
+    model (8 routes, ADR-017). Steep normal-effort hikes help most, as
+    they separate "climbs fast" from "pushed hard" (ADR-018).
+-   **One-way routes.** Separate ascent and descent rates need several;
+    today they share one factor (ADR-017).
+-   **An explicit effort factor** needs about three hard and five normal
+    efforts on varied terrain (ADR-018).
+-   **Strava reference values** (distance, moving time, gain) for
+    activities 3–7. The distance and moving-time rules are calibrated on
+    two activities from one device (ADR-007, ADR-010).
 
-### Exit criteria
+### Optional improvements
 
--   Fresh clone installs and runs (empty) tests.
--   No personal activity file is tracked by Git.
+-   Explanations for plan-vs-activity comparison and track analysis,
+    using the same pattern: facts, template, caveats (ADR-020).
+-   German explanations tried with the real model, and Ollama
+    `keep_alive` to avoid the load delay on the first request.
+-   Revisit provisional thresholds as data grows:
+    -   drift 20 m (ADR-014);
+    -   baseline gates of 5 and 8 routes (ADR-016, ADR-017);
+    -   moving speed 0.3 m/s (ADR-007).
 
-## Phase 1 --- GPX reading and quality checks
+## Phases
 
-### Tasks
+### Phase 0 --- Foundation ✅
 
--   Domain types: `Track`, `TrackKind`, `ElevationSource`, `Inference`,
-    `QualityWarning`.
--   `gpx.reader`: bytes → tracks, reading `<trk>` (all `<trkseg>`) and
-    `<rte>`; keep `creator` and `<type>`.
--   Kind and elevation-source heuristics, marked as inferred.
--   Quality checks from DATA_MODEL.md §8.
--   Synthetic fixtures: empty file, one point, two segments with a gap,
-    missing elevation on some points, partial timestamps, duplicate
-    points, a single GPS jump, Cyrillic track name, `<rte>`-only file.
--   CLI: `alpha inspect FILE` prints tracks, point counts, inferred
-    kind/elevation source, and warnings.
+Package skeleton (`src/alpha/`), `pyproject.toml`, ruff/mypy/pytest,
+`.gitignore` for personal data, architecture tests, the exploration
+script moved to `scripts/explore.py`.
 
-### Exit criteria
+Exit criteria met: a fresh clone installs and runs the tests; no
+personal activity file is tracked by Git.
 
--   All four reference files load; mapy.com files are inferred
-    `PLANNED/PLANNER_DEM`, Strava files `ACTIVITY` with timestamps.
--   Invalid input gives structured warnings or errors, never a crash.
--   The original bytes are never modified.
+### Phase 1 --- GPX reading and quality checks ✅
 
-## Phase 2 --- Deterministic analysis
+Column-oriented `Track` and enums, GPX reader for `<trk>` (all
+`<trkseg>`) and `<rte>` with encoding detection, kind and
+elevation-source heuristics marked as inferred, quality warnings
+(DATA_MODEL.md §8), synthetic fixtures for the edge cases, and
+`alpha inspect`.
 
-### Tasks
+Exit criteria met:
+-   all reference files load;
+-   planned routes are inferred `planned`/`planner_dem`, activities
+    `activity` with timestamps;
+-   invalid input gives structured errors, never a crash;
+-   original bytes are never modified.
 
--   Geodesic step distance, masked at source-segment boundaries.
--   Hysteresis ascent/descent (ADR-004).
--   Resampling to profile bins; bin gradient; outlier flagging without
-    clipping (ADR-009).
--   Time metrics for activities: elapsed, moving, stopped, recording
-    gaps (ADR-007).
--   Climb sections and gradient distribution.
--   `analyse(track, params) -> Analysis` with `algorithm_version` and
-    `params_hash`.
--   CLI: `alpha analyse FILE [--profile-bin-m 50 ...]` prints summary,
-    climbs, warnings; optional JSON output.
--   Regression tests: golden JSON outputs for the reference files (the
-    personal ones run only when present in `data/local/`).
+### Phase 2 --- Deterministic analysis ✅
 
-### Exit criteria
+-   Geodesic distance with a jitter filter (ADR-010), hysteresis
+    ascent (ADR-004), 50 m profile bins and unclipped gradient
+    (ADR-009), elapsed/moving/stopped time (ADR-007), climb sections,
+    gradient distribution.
+-   `analyse(track, params)` with `ALGORITHM_VERSION` and `params_hash`,
+    the JSON report, and golden regression outputs.
+-   **Calibration** against Strava: distance within 0.3 %, moving time
+    within 1 % on both reference activities.
 
--   Each metric in DATA_MODEL.md §5 has a unit test with a hand-checked
-    synthetic fixture.
--   Invariants tested: distance is unchanged when points are
-    duplicated; ascent − descent ≈ end − start elevation; reversing a
-    track swaps ascent and descent; results do not depend on point
-    density beyond a documented tolerance (resample a fixture at 1 m
-    and 15 m).
--   Same input and params → byte-identical JSON output.
--   Planned routes report time metrics as unknown, not zero.
+Exit criteria met:
+-   every metric has a hand-checked unit test;
+-   invariants hold (duplicates, reversal, resampling);
+-   byte-identical JSON for the same input;
+-   planned routes report time as unknown.
 
-## Phase 3 --- Persistence and comparison
+### Phase 3 --- Persistence and comparison ✅
 
-### Tasks
+SQLite schema with SQLAlchemy 2, original files stored by SHA-256
+(idempotent import), cached analyses, user corrections and plan links,
+the comparison of two tracks.
 
--   SQLite schema from DATA_MODEL.md §10 with SQLAlchemy 2.x.
--   Import use case: SHA-256 idempotency, stored copy, one transaction.
--   User overrides: kind, elevation source, `planned_track_id` link.
--   `ComparisonResult` (DATA_MODEL.md §7.1).
--   CLI: `alpha import`, `alpha list`, `alpha compare A B`.
+Exit criteria met:
+-   data survives restart;
+-   re-import is a no-op;
+-   Plan 1 vs Activity A shows the distance, ascent,
+    gradient-band, and climb differences, with the plan's time unknown.
 
-### Exit criteria
+### Phase 4 --- Scenario engine ✅
 
--   Data survives restart; importing the same file twice is a no-op.
--   Comparing `input.gpx` with `Nebelhorn_push.gpx` (same summit,
-    different path) shows the distance, ascent, gradient-band, and climb
-    differences, and marks time metrics of the planned route as
-    unknown.
--   Repositories are tested against a temporary SQLite file; domain
-    tests do not touch the database.
+DIN 33466 as a registered method; assumptions carry their source
+(`user`, `preset`, later `fitted`); a speed-multiplier range; breakdown
+and uncertainty notes; observed times of the track or of linked
+activities with an implied speed multiplier.
 
-## Phase 4 --- Scenario engine
+Exit criteria met:
+-   slower assumptions never give shorter durations;
+-   breaks add exactly their duration;
+-   no result without its assumptions;
+-   observed times are labelled as observed.
 
-### Tasks
+### Phase 5 --- API and minimal UI ✅ (MVP complete)
 
--   `din33466` method with explicit assumptions and labelled preset
-    (DATA_MODEL.md §7.2).
--   Speed multipliers produce a faster/baseline/slower range.
--   Full breakdown and uncertainty notes in every result.
--   CLI: `alpha scenarios TRACK --preset din --break-min 30`.
+FastAPI with schemas mirroring `alpha.report`, uniform errors, one
+privacy-preserving log line per request, a self-contained local page,
+and `alpha serve` on `127.0.0.1`.
 
-### Exit criteria
+Exit criteria met:
+-   end-to-end import → analyse → link → compare → scenarios;
+-   no business logic in route handlers.
 
--   Monotonic tests: lower speed never shortens a scenario; breaks add
-    exactly their duration.
--   Output never shows a single number without assumptions.
--   For a planned route with a linked activity, the output shows the
-    recorded moving time next to the scenarios, labelled as observed.
+### Phase 6 --- Terrain enrichment ✅
 
-## Phase 5 --- API and minimal UI
+-   **Copernicus GLO-30** via OpenTopography: opt-in, fixed 0.25° tiles
+    (the track is never sent), local cache. Sampled every 20 m; stored
+    with provenance and attribution (ADR-012).
+-   **Bavaria DGM1** from local GeoTIFF tiles, downloadable from the
+    portal's metalink and verified tile by tile (ADR-013).
+-   Any analysis can run on DEM elevation (`--elevation dem:<id>`), as a
+    hashed parameter and never as a fallback.
+-   The elevation check reports:
+    -   offset and spread;
+    -   **drift** (`ELEVATION_DRIFT`, ADR-014);
+    -   **terrain slope** in 10° bands (ADR-015).
+-   Findings:
+    -   Strava's gain equals COP30 sampled every 20 m.
+    -   COP30 overstates gain in forest by up to 28 % against DGM1.
+    -   One barometer drifted by −40 m on the ascent of Activity A.
 
-### Tasks
+Exit criteria met:
+-   every DEM-derived value carries its dataset, model type, and
+    attribution;
+-   downloads only on explicit request;
+-   recorded elevation is never modified;
+-   findings are pinned by regression tests that skip without personal
+    data.
 
--   FastAPI endpoints (ARCHITECTURE.md §8); Pydantic schemas at the
-    boundary.
--   Minimal UI only if it helps inspect profiles and comparisons (a
-    static page with a chart is enough).
--   Structured logging without coordinates; documented error responses.
+### Phase 7 --- Personal performance baseline ✅
 
-### Exit criteria
+-   `alpha.modelling` is pure fitting on samples; the application layer
+    collects them (ADR-016).
+-   **Model 1:** one speed multiplier on DIN 33466.
+    -   Fitted in log space, one weight per route.
+    -   95 % ranges for the average and for a single new hike.
+    -   Leave-one-route-out validation.
+    -   Gate of 5 routes (ADR-016).
+-   **Model 2:** flat and vertical factors, with gates of 8 routes and a
+    route mix that varies by ×1.5 (ADR-017).
+-   **Effort** is the user's annotation. Fits use normal efforts by
+    default, and other efforts are compared with the fit (ADR-018).
+-   `--personal` scenarios use the better-validated model. The range is
+    the user's own variation, and there is no fallback (ADR-019).
+-   **Today:** model 1 is fitted on 5 routes (×1.46, typical error 3 %);
+    model 2 waits for 3 more routes.
 
--   End-to-end: import → analyse → link activity to plan → compare →
-    scenarios.
--   No business logic in route handlers.
+Exit criteria met:
+-   transparent baseline before any ML;
+-   route-grouped validation with sample counts and errors;
+-   "not enough data" below documented minimums.
 
-------------------------------------------------------------------------
+ML stays deferred: the transparent models already predict within a few
+percent.
 
-## Post-MVP
+### Phase 8 --- AI explanation layer ✅
 
-### Phase 6 --- Terrain enrichment
+-   Templates turn each report (scenarios, elevation check, baseline)
+    into facts and statements. They are the default: exact, instant,
+    free.
+-   `--llm`: a local Ollama model rewords the draft. It is accepted only
+    if:
+    -   every number and duration matches a fact;
+    -   cited facts are stated;
+    -   nothing is left out;
+    -   forbidden topics are absent.
 
--   ✅ DEM provider adapter; sample elevation along tracks
-    (`ElevationSource.DEM_ENRICHED`).
--   ✅ Record DEM source, resolution, and vertical datum.
--   ✅ Compare recorded/planner elevation with DEM; surface discrepancies.
--   ✅ Analyse with the DEM series as an explicit, hashed parameter choice.
--   ✅ Enrichment and elevation check from the API and page; batch
-    enrichment (`alpha enrich --all`).
--   ✅ National terrain model from local tiles (Bavaria DGM1); forest
-    effect measured (ADR-013).
--   ✅ Drift of recorded elevation against the model (ADR-014).
--   ✅ Terrain slope from raster, clearly separated from track gradient
-    (ADR-015).
+    Caveats are never reworded. CLI, API, and page.
+-   The model sees facts only: no coordinates and no GPX text (ADR-020).
 
-**Phase 6 exit:** every DEM-derived value carries its dataset, surface
-or terrain type, and attribution. Downloads happen only on explicit
-request and never send the track (COP30), or send only what the user
-chose (DGM1 metalink). Recorded elevation is never modified. The findings
-are reproducible from regression tests that skip when personal data is
-absent.
+-   **Adversarial hardening (2026-11-27):**
+    -   A catalogue of 30 attacks in 6 categories, and
+        `scripts/eval_explain.py` (`--templates`, `--attacks`, `--live`,
+        comparing models by acceptance and latency).
+    -   False acceptance fell from 73 % to 0 % (420 attacks on the
+        user's reports).
+    -   The language is an allow-list, closing a prompt-injection path
+        (ADR-020).
 
-### Phase 7 --- Personal performance baseline
-
--   ✅ Step 1 (ADR-016): `alpha.modelling` (pure, architecture-tested),
-    one speed multiplier on DIN 33466. Fitted in log space per route
-    group, with 95 % intervals for the average and for a single new
-    hike, leave-one-route-out validation, and a gate of 5 distinct
-    routes. `alpha baseline [--elevation …] [--json]`. With 4 activities:
-    not enough data (k would be ×1.82, LOO error median 17 %, max 44 %).
--   ✅ Step 2 (ADR-017): flat and vertical factors (ascent and descent
-    share one, because loops cannot separate them). Grid-fitted per route
-    group, with jackknife intervals. Gates: 8 routes, and a route mix
-    (`v / h`) that varies by at least ×1.5. Shown next to model 1 with the
-    leave-one-route-out error of each. Preview on 4 activities: median
-    error 7 % vs 17 %, but the vertical factor's interval is still
-    0.36–31.
--   ✅ Step 3 (ADR-018): effort annotation (`alpha edit ID --effort
-    easy|normal|hard`; schema 4, `track_annotations`). Baselines are
-    fitted on normal and untagged efforts by default (`--effort`
-    switches). Other efforts are compared with the fitted models and
-    summarised per label (hard ×2.08 vs not stated ×1.58, observed).
-    Finding: the hard efforts are also the steepest routes, so effort and
-    terrain are confounded until normal-effort steep hikes exist.
--   ✅ Step 4 (ADR-019): `alpha scenarios --personal` (API
-    `assumptions=personal`, page selector, `GET /baseline`).
-    -   Uses the better-validated fitted model, with the same analysis
-        params as the estimate.
-    -   The range is the user's own 95 % single-hike variation.
-    -   No fallback: 409 `BASELINE_NOT_FITTED`.
-    -   With 7 activities (5 normal-effort routes, recorded elevation),
-        model 1 is fitted: ×1.46, LOO median 3 %. Model 2 needs 3 more
-        routes; its preview separates terrain from effort (Nebelhorn +20 %
-        effort instead of +56 %).
-
-**Phase 7 status:** the transparent baseline is complete and in use.
-Remaining, data-driven rather than code-driven: model 2 activates at 8
-normal-effort routes. An explicit effort factor and separate ascent and
-descent rates need more hard efforts and one-way routes (ADR-017,
-ADR-018). ML stays deferred: the transparent models already predict
-within a few percent.
-
--   Dataset from activities only; profile bins with moving time are the
-    natural training rows (gradient → vertical/horizontal speed).
--   New package `alpha.modelling` (never inside `domain`, ADR-005): reads
-    stored analyses via the application layer and returns
-    `DinAssumptions(source=fitted)` with sample count and error range,
-    which feed the existing `din33466` method unchanged.
--   First baseline: fit personal DIN parameters from past activities
-    (the implied speed multipliers of Phase 4 are the simplest form) and
-    report their spread; only then try ML. A genuinely different model,
-    such as pace per gradient band, becomes a new registered method.
--   Route-grouped or chronological validation; report sample count and
-    error ranges.
--   Show "not enough data" until a documented minimum of activities
-    exists. Two activities are not enough.
-
-### Phase 8 --- AI explanation layer
-
--   LLM receives typed analysis results and assumptions, not raw
-    coordinates; opt-in.
--   Explains, never calculates; structured output referencing metric
-    names; validated against the analysis.
--   ✅ Step 1 (ADR-020): `alpha explain scenarios|elevation|baseline
-    [ID]`.
-    -   Template explanations from the JSON reports: facts with keys and
-        provenance; statements cite them. This is the default, free and
-        exact.
-    -   `--llm`: a local Ollama model (default `llama3.1:8b`, loopback
-        only, no cost, no data leaves the computer) rewords the draft as
-        JSON statements.
-    -   The validator checks fact keys, every duration and number, and
-        forbidden topics. On failure the template is shown, with the
-        reasons.
-    -   CUDA failure → CPU retry, with a note.
-    -   Report format 11.
--   ✅ Step 2: `GET /tracks/{id}/explanation`, `GET /baseline/explanation`,
-    `alpha serve --llm-model`, and Explain buttons on the page (template
-    at once, local model on request). Caveats are fixed text that is never
-    reworded. On the GPU: about 16–18 s per explanation.
-
--   ✅ Step 3: the validator checks citations. A number must belong to a
-    fact the statement cites, and cited facts must be stated, so a right
-    number with the wrong meaning is rejected. Tolerances follow display
-    precision; completeness is checked. With the real model, 5 of 5
-    explanations were accepted.
-
-**Phase 8: closed (2026-11-24).** All exit criteria are met (ADR-020).
-Optional later work, not needed for the phase:
--   an evaluation script comparing models and prompts by acceptance rate
-    and latency;
--   explanations for plan-vs-activity comparison and track analysis (the
-    same pattern: facts, template, caveats);
--   German output tried with the real model;
--   keeping the model loaded between clicks (Ollama `keep_alive`).
+Exit criteria met:
+-   explains, never calculates;
+-   opt-in;
+-   structured output referencing metric names;
+-   validated against the report.
 
 ### Phase 9 --- Platform
 
--   Map UI, background processing, PostGIS, deployment: only when
-    justified by use and measurement.
-
-## First backlog
-
-1.  Phase 0 housekeeping: package, tooling, `.gitignore`, move data
-    files.
-2.  `Track` type and `gpx.reader` with synthetic fixtures.
-3.  Quality checks and `alpha inspect`.
-4.  Step distance with segment masking.
-5.  Hysteresis ascent/descent.
-6.  Profile bins and gradient.
-7.  Activity time metrics.
-8.  Climb sections, gradient distribution, `analyse`, golden tests.
-9.  Persistence only after the analysis output is stable.
+Map UI, background processing, PostGIS, and deployment, each only
+when justified by use and measurement. Nothing is planned yet.
