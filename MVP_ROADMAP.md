@@ -46,11 +46,10 @@ models (ADR-021).
     model (8 routes, ADR-017). Steep normal-effort hikes help most: in
     the simulation two steep routes among 8 did as much for steep
     predictions as 12 more similar routes (ADR-021).
--   **Moving threshold for speed fits.** On generated hikes, slow steep
-    climbing under 0.3 m/s counts as stopped and inflates the climbing
-    factor (1.88 fitted vs 1.60 true; 1.63 at 0.15 m/s). Check how much
-    climbing time of Activities A and B lies between 0.15 and 0.3 m/s
-    before deciding on a fit-specific threshold (ADR-021).
+-   **Moving threshold for speed fits: checked, unchanged.** On real
+    hikes, only 0–5 min of climbing per hike is at 0.15–0.3 m/s; that
+    band is mostly rests. Recheck if very steep normal-effort hikes are
+    added (ADR-021).
 -   **One-way routes.** Separate ascent and descent rates need several;
     today they share one factor (ADR-017).
 -   **An explicit effort factor** needs about three hard and five normal

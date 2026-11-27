@@ -173,6 +173,23 @@ compared with the generator's truth.
     it is material, the fit should use its own threshold, recorded
     with the fit. This is not changed yet: the effect is measured only
     on generated hikes, whose pace on steep ground is an assumption.
+-   **Checked on real data (2026-11-27): the threshold stays at
+    0.3 m/s.** The time in 20 s windows at 0.15–0.3 m/s (3D) was
+    split by vertical speed; climbing means at least 3 m/min up.
+
+    | Activities | Time at 0.15–0.3 m/s | Of it climbing | Of it level |
+    |---|---|---|---|
+    | A, B (hard, not in the fit) | 18–21 min | 4.7 / 3.7 min (3 % / 1 % of moving time) | 14–16 min |
+    | C–G (normal) | 1–27 min | 0–0.7 min | 1–24 min |
+
+    The slow band is mostly level time around rests: shuffling and GPS
+    drift. Lowering the threshold would count rests as moving. Real
+    slow climbing is too short to bias the fit. The bias on generated
+    hikes comes from the generator's assumption about pace on steep
+    ground: its hiker climbs the steepest parts more slowly than the
+    owner does. Model 1 fitted ×1.461 at 0.3 m/s, ×1.411 at 0.2, and
+    ×1.381 at 0.15. The difference is mostly rest time counted as
+    moving.
 -   The generated hikes test the pipeline and the models. They do not
     test whether DIN 33466 describes a real person; only real
     recordings can.

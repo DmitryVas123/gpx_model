@@ -16,11 +16,14 @@ import json
 import sys
 import time
 from collections import Counter
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+
+from tests.explain_attacks import ATTACKS  # noqa: E402
 
 from alpha.cli import main  # noqa: E402
 from alpha.explain import SYSTEM_PROMPT, explain  # noqa: E402
@@ -28,7 +31,11 @@ from alpha.explain.explain import _user_prompt  # noqa: E402
 from alpha.explain.guards import content_problems  # noqa: E402
 from alpha.explain.validate import FORBIDDEN  # noqa: E402
 from alpha.llm import DEFAULT_MODEL, OllamaRewriter  # noqa: E402
-from tests.explain_attacks import ATTACKS  # noqa: E402
+
+
+def fixed(text: str) -> Callable[[str, str], str]:
+    """A rewriter that always answers ``text``."""
+    return lambda system, user: text
 
 
 def report(data_dir: Path, *argv: str) -> dict[str, Any] | None:
@@ -79,7 +86,7 @@ def run_attacks(items: list[tuple[str, str, dict[str, Any]]]) -> None:
                 bad = attack.build(template.statements, template.facts)
             except (LookupError, KeyError):
                 continue  # this report has no value the attack needs
-            result = explain(topic, rep, lambda s, u, p=answer(bad): p)
+            result = explain(topic, rep, fixed(answer(bad)))
             total[attack.category] += 1
             if result.source == "model":
                 accepted[attack.category] += 1
@@ -100,7 +107,7 @@ def run_templates(items: list[tuple[str, str, dict[str, Any]]]) -> None:
         echo = answer(
             [(s.text, list(s.facts)) for s in template.statements if not s.caveat]
         )
-        result = explain(topic, rep, lambda s, u, p=echo: p)
+        result = explain(topic, rep, fixed(echo))
         if result.source != "model":
             bad += 1
             print(f"  REJECTED template {label}: {result.fallback_reasons[:2]}")
@@ -128,7 +135,8 @@ def run_live(items: list[tuple[str, str, dict[str, Any]]], model: str) -> None:
         for r in result.fallback_reasons:
             reasons[r.split(":", 2)[-1].strip()[:60]] += 1
         print(
-            f"  {'accepted' if ok else 'REJECTED':8} {time.perf_counter() - t:5.1f} s  {label}"
+            f"  {'accepted' if ok else 'REJECTED':8} "
+            f"{time.perf_counter() - t:5.1f} s  {label}"
         )
     n = len(items)
     print(
@@ -158,11 +166,12 @@ def run_live(items: list[tuple[str, str, dict[str, Any]]], model: str) -> None:
             t for t in texts if FORBIDDEN.search(t) or content_problems([t], draft_text)
         ]
         verdict = explain(
-            "scenarios", scen, lambda s, u, r=raw: r, model=model
+            "scenarios", scen, fixed(raw), model=model
         )  # the same answer through the full validator
         print(
             f"  probe: {probe[9:60]!r}\n    model complied in {len(complied)} "
-            f"statement(s); validator {'ACCEPTED' if verdict.source == 'model' else 'rejected'}"
+            "statement(s); validator "
+            + ("ACCEPTED" if verdict.source == "model" else "rejected")
         )
         for t in complied[:2]:
             print(f"      > {t[:110]}")

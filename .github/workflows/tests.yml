@@ -1,0 +1,37 @@
+name: tests
+
+# The four checks from CLAUDE.md §9 on every push and pull request.
+# Tests that need personal files (data/local/, git-ignored) skip here;
+# the synthetic fixtures cover the same code. No test uses the network.
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: pip install -e ".[dev]"
+      - name: Ruff
+        run: python -m ruff check .
+      - name: Format
+        run: python -m ruff format --check .
+      - name: Mypy
+        run: python -m mypy
+      - name: Pytest
+        run: python -m pytest -q

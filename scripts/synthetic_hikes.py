@@ -80,9 +80,9 @@ def _to_xy(p: Path3) -> tuple[np.ndarray, np.ndarray, float, float]:
     return x, y, lat0, lon0
 
 
-def _from_xy(x: np.ndarray, y: np.ndarray, lat0: float, lon0: float) -> tuple[
-    np.ndarray, np.ndarray
-]:
+def _from_xy(
+    x: np.ndarray, y: np.ndarray, lat0: float, lon0: float
+) -> tuple[np.ndarray, np.ndarray]:
     lat = lat0 + y / EARTH_M_PER_DEG
     lon = lon0 + x / (EARTH_M_PER_DEG * math.cos(math.radians(lat0)))
     return lat, lon
@@ -211,12 +211,17 @@ def schedule(
     local = np.maximum(h, v) + np.minimum(h, v) / 2  # DIN rule per step
     weight = local * np.exp(_smooth_noise(len(d), 0.15, 50, rng))
     step_s = weight / weight.sum() * total
-    return np.concatenate([[0.0], np.cumsum(step_s)]), float(d.sum()), float(
-        up.sum()
-    ), float(total)
+    return (
+        np.concatenate([[0.0], np.cumsum(step_s)]),
+        float(d.sum()),
+        float(up.sum()),
+        float(total),
+    )
 
 
-def _smooth_noise(n: int, sigma: float, width: int, rng: np.random.Generator) -> np.ndarray:
+def _smooth_noise(
+    n: int, sigma: float, width: int, rng: np.random.Generator
+) -> np.ndarray:
     raw = rng.normal(0, 1, n + width)
     smooth = np.convolve(raw, np.ones(width) / math.sqrt(width), mode="valid")[:n]
     return sigma * smooth

@@ -216,7 +216,8 @@ python -m mypy
 python -m pytest
 ```
 
-All four must pass. `tests/test_architecture.py` enforces the package
+All four must pass; `.github/workflows/tests.yml` runs them on every
+push. `tests/test_architecture.py` enforces the package
 rules in [ARCHITECTURE.md](ARCHITECTURE.md). Tests never use the network.
 Tests on your personal files run only when those files exist in
 `data/local/`.

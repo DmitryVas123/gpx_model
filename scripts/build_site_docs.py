@@ -35,10 +35,12 @@ def _site_target(target: str, page_dir: str) -> str | None:
     if target.startswith(("http://", "https://", "mailto:")):
         return None
     name = Path(target).name
-    if target in PAGES or name in PAGES and "/" not in target:
+    if target in PAGES or (name in PAGES and "/" not in target):
         page = PAGES[name]
         return page if page_dir == "" else f"../{page}"
-    if target.endswith("docs/adr/README.md") or (page_dir == "adr" and target == "README.md"):
+    if target.endswith("docs/adr/README.md") or (
+        page_dir == "adr" and target == "README.md"
+    ):
         return "adr/index.md" if page_dir == "" else "index.md"
     if re.fullmatch(r"(?:docs/adr/)?\d{3}-[\w-]+\.md", target):
         return f"adr/{name}" if page_dir == "" else name
