@@ -15,7 +15,10 @@ come from the report. These guards cover what numbers alone cannot:
     markup, and instructions, in English and German. Words that the
     template itself uses are allowed;
 -   **provenance:** "measured" or "recorded" may describe only observed
-    or calculated values, never estimates or fitted speeds.
+    or calculated values, never estimates or fitted speeds;
+-   **pairs** (comparisons): a value of track A or B must stand after its
+    own letter, and a difference must keep its direction ("less" stays
+    "less"), so swapped tracks or a flipped difference fail.
 
 All rules are deterministic and work on a statement's text and its cited
 facts. They can still be fooled by text that is wrong in meaning but uses
@@ -40,6 +43,9 @@ _CONTENT = re.compile(
     r"fine for you|suitable|unsuitable|easy|easily|difficult\w*|challenging|"
     r"technical\w*|exposed|exposure|scrambl\w*|beginners?|experienced|"
     r"fit enough|worry|manageable|doable|enjoy\w*|"
+    # judgements between routes (comparisons invite them)
+    r"easier|easiest|harder|hardest|tougher|toughest|demanding|strenuous|"
+    r"better|worse|best|worst|prefer\w*|choice|choose|"
     # conditions
     r"conditions?|summer|winter|spring|autumn|seasons?|dark|night|"
     r"visibility|fog\w*|slippery|wet|mud\w*|"
@@ -47,7 +53,8 @@ _CONTENT = re.compile(
     r"exactly|precisely|guarantee\w*|certain(?:ly)?|definitely|for sure|"
     r"will (?:take|need|be)|always|never|"
     # German
-    r"sicher\w*|einfach|leicht|schwierig\w*|schwer|empfehl\w*|solltest|"
+    r"sicher\w*|einfach\w*|leicht\w*|schwierig\w*|schwer\w*|empfehl\w*|solltest|"
+    r"besser|schlechter|anstrengend\w*|"
     r"sollten|musst|müssen|bedingungen|sommer|winter|garantiert|genau|"
     # output channel
     r"ignore|instructions?|system prompt|prompt"
@@ -226,8 +233,11 @@ _FAMILIES: tuple[tuple[str, frozenset[str]], ...] = (
     ("observed.*.moving", frozenset({"observed", "moving"})),
 )
 # Clauses: split at punctuation and at a new noun phrase after "and"/"while".
+# German joins noun phrases without an article ("die Strecke 2:31 h und
+# Aufstieg 2:59 h"), so every "und" ends a clause there.
 _CLAUSE = re.compile(
-    r"[,;:.!?]\s|\band (?:the|a|an|your)\b|\bwhile\b|\bwhereas\b|\bbut\b",
+    r"[,;:.!?]\s|\band (?:the|a|an|your)\b|\bwhile\b|\bwhereas\b|\bbut\b|"
+    r"\bund\b|\bwährend\b|\baber\b|\bwohingegen\b",
     re.IGNORECASE,
 )
 _SPAN = re.compile(
@@ -336,4 +346,106 @@ def provenance_problems(
                     f"calls {'/'.join(sorted(kinds))} values '{word.group(0)}'",
                 )
             )
+    return found
+
+
+# --- pairs (comparison) -----------------------------------------------------------
+
+_LETTER = re.compile(r"\b([AB])\b|#(\d+)\b")
+_UP = r"more|greater|higher|longer|bigger|larger|mehr|höher|länger|größer"
+_DOWN = r"less|fewer|lower|shorter|smaller|weniger|niedriger|tiefer|kürzer|kleiner"
+_DIRECTION_WORDS = {
+    "up": re.compile(rf"\b(?:{_UP})\b", re.IGNORECASE),
+    "down": re.compile(rf"\b(?:{_DOWN})\b", re.IGNORECASE),
+}
+_DIRECTION = {
+    "more": "up",
+    "longer": "up",
+    "higher": "up",
+    "less": "down",
+    "shorter": "down",
+    "lower": "down",
+}
+
+
+def _track_names(text: str, ids: dict[str, str]) -> list[tuple[int, int, str | None]]:
+    return [
+        (m.start(), m.end(), m[1].lower() if m[1] else ids.get(m[2]))
+        for m in _LETTER.finditer(text)
+    ]
+
+
+def pair_problems(
+    statements: list[tuple[str, tuple[str, ...]]], facts: FactSet
+) -> list[Finding]:
+    """Comparison facts ``a.*`` / ``b.*`` and ``diff.*`` with ``dir.*``.
+
+    -   Numbers that state a cited ``a.*`` or ``b.*`` value (and not the
+        other track's value) must all follow their track's name (letter or
+        ID such as "#5": "B 554 m, A 1192 m"), or all precede it
+        ("16 % for B and 26 % for A"). A swap breaks both patterns.
+    -   A statement citing ``diff.X`` must not use a word of the opposite
+        direction to ``dir.X``.
+    """
+    # A track may also be named by its ID ("#5"), as the draft introduces it.
+    ids = {
+        str(f.value).lstrip("#"): side
+        for side in ("a", "b")
+        if (f := facts.get(f"{side}.track")) is not None
+    }
+    found: list[Finding] = []
+    for i, (text, keys) in enumerate(statements):
+        cited = [facts[k] for k in keys if k in facts]
+        numeric = [f for f in cited if f.unit != "text"]
+        tracks = [f for f in numeric if f.key[:2] in ("a.", "b.")]
+        others = [f for f in numeric if f.key[:2] not in ("a.", "b.")]
+        names = _track_names(text, ids)
+        values: list[tuple[str, str, str | None, str | None]] = []
+        for num in _SPAN.finditer(text):
+            owners = {f.key[0] for f in tracks if _matches(num.group(0), f)}
+            if len(owners) != 1 or any(_matches(num.group(0), f) for f in others):
+                continue  # not a track value, or ambiguous (e.g. diff = A's value)
+            before = [n for s0, e0, n in names if e0 <= num.start()]
+            after = [n for s0, e0, n in names if s0 >= num.end()]
+            values.append(
+                (
+                    num.group(0).strip(),
+                    owners.pop(),
+                    before[-1] if before else None,
+                    after[0] if after else None,
+                )
+            )
+        # Either every value follows its track's name ("B 554 m, A 1192 m")
+        # or every value precedes it ("16 % for B and 26 % for A").
+        if values and not (
+            all(b == want for _, want, b, _ in values)
+            or all(a == want for _, want, _, a in values)
+        ):
+            for number, want, b, _ in values:
+                if b != want:
+                    found.append(
+                        Finding(
+                            i,
+                            f"'{number}' is the value of track {want.upper()} "
+                            "but is not written next to it",
+                        )
+                    )
+        for key in keys:
+            if not key.startswith("diff."):
+                continue
+            direction = facts.get("dir." + key[5:])
+            if direction is None:
+                continue
+            side = _DIRECTION.get(str(direction.value))
+            if side is None:
+                continue
+            opposite = _DIRECTION_WORDS["down" if side == "up" else "up"]
+            if (m := opposite.search(text)) is not None:
+                found.append(
+                    Finding(
+                        i,
+                        f"'{m.group(0)}' reverses the difference: B has "
+                        f"{direction.value}, not the opposite",
+                    )
+                )
     return found

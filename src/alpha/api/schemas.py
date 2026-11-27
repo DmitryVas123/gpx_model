@@ -591,7 +591,7 @@ class ExplanationFact(Strict):
 
 class Explanation(Strict):
     format_version: str
-    topic: Literal["scenarios", "elevation", "baseline"]
+    topic: Literal["scenarios", "elevation", "baseline", "comparison"]
     source: Literal["template", "model"]
     model: str | None
     statements: list[ExplanationStatement]

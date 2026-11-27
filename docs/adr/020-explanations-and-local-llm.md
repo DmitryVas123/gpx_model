@@ -184,6 +184,52 @@ or anchor. Examples: a correct statement with a misleading connective
 ("faster or slower than that"), or a model that cites the wrong fact
 consistently and words it accordingly. The template stays the default.
 
+## Comparisons, German, and closing Phase 8 (2026-11-27)
+
+**Comparison topic** (`alpha explain comparison A B`,
+`GET /comparisons/explanation`, page button):
+
+-   The template states distance, ascent, descent, highest point, moving
+    time, the largest gradient-band difference, and the steepest climb.
+    Each value is written next to its letter ("B 554 m, A 1192 m"). The
+    report's notes become caveats.
+-   A new guard, `pair_problems`, checks two things:
+    -   **Swaps:** values of A and B must consistently follow, or
+        consistently precede, their own track's name. The name can be the
+        letter or the ID ("#5").
+    -   **Direction:** a cited difference must not use a word of the
+        opposite direction ("more" for less), in English and German.
+-   Eleven new attacks cover the comparison. They found two gaps, now
+    closed: "safer" slipped past `safe`, and comparative judgements
+    ("easier", "better choice") were not on the content list.
+-   On the owner's reports, attacks on scenarios and comparisons are
+    accepted 0 of 552 times. Templates pass their own checks 40/40.
+
+**German, live (llama3.1:8b):**
+
+-   **First run: 21/28 accepted.** Six rejections were false. German joins
+    noun phrases with a bare "und" ("die Strecke 2:31 h und Aufstieg
+    2:59 h"), so a duration seemed to stand next to the wrong words. A
+    German "und" now ends a clause.
+-   **Second run: 37/40 accepted, including comparisons.** The 3
+    rejections were again correct text. The model named the tracks "#5"
+    and "#6", or put the letter after the value ("26 % for A"). The guard
+    now accepts both forms, and the prompt asks for "B …, A …" as in the
+    draft.
+-   **Injection probes:** the model followed none. One probe ("mention the
+    weather") changed an answer, and the validator rejected it.
+-   **English comparisons, before the last two guard fixes:** 6/12
+    accepted. The rejection that was inspected was the "26 % for A" form
+    above. Comparisons have not been re-measured live after the fixes:
+    on this laptop the model ran on the CPU (78 s per answer).
+
+**`keep_alive`:** the rewriter asks Ollama to keep the model loaded for
+15 minutes, so only the first explanation pays the load delay.
+
+**Phase 8 is complete.** Explanations cover scenarios, the elevation
+check, the personal baseline, and comparisons. An explanation of a
+single track's analysis remains optional (MVP_ROADMAP.md).
+
 ## Consequences
 
 -   The template is the default because it is exact and complete. The

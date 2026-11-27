@@ -421,7 +421,10 @@ $("cmp-run").addEventListener("click", async () => {
       el("p", { class: "muted" }, "“Large difference” is a display hint, not a verdict."),
       el("h3", {}, "Gradient distribution"), bands,
       el("h3", {}, "Notes"), el("ul", { class: "notes" }, ...c.notes.map((n) => el("li", {}, n))),
-      seriesNote(c.elevation_series.a));
+      seriesNote(c.elevation_series.a),
+      explainBlock("/comparisons/explanation",
+        new URLSearchParams({ a: String(c.a.id), b: String(c.b.id), elevation: $("elevation").value }),
+        "Explain this comparison"));
   } catch (e) { showError(out, e); }
 });
 

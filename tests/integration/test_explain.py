@@ -194,6 +194,7 @@ def test_ollama_adapter_and_cpu_retry(monkeypatch: pytest.MonkeyPatch) -> None:
     assert json.loads(rewriter("sys", "user"))["statements"][0]["text"] == "ok"
     assert len(bodies) == 2 and bodies[1]["options"]["num_gpu"] == 0
     assert bodies[0]["format"]["required"] == ["statements"]
+    assert bodies[0]["keep_alive"] == "15m"  # model stays loaded between requests
     assert "CPU" in rewriter.notes[0]
 
     def refused(request: Any, timeout: float) -> FakeResponse:
@@ -431,3 +432,32 @@ def test_cpu_fallback_is_per_request(monkeypatch: pytest.MonkeyPatch) -> None:
     rewriter("sys", "second")  # tries the GPU again
     assert [("num_gpu" in b["options"]) for b in bodies] == [False, True, False]
     assert len(rewriter.notes) == 1
+
+
+# --- comparison -------------------------------------------------------------------
+
+
+def test_cli_explains_a_comparison(data: str) -> None:
+    code, text = run("--data-dir", data, "explain", "comparison", "1", "2")
+    assert code == EXIT_OK
+    assert "This compares track B (#2) against track A (#1)." in text
+    assert "say nothing about conditions" in text  # ALPHA's note, as a caveat
+    code, text = run("--data-dir", data, "explain", "comparison", "1")
+    assert code == EXIT_BAD_PARAMS and "two track IDs" in text
+    code, _ = run("--data-dir", data, "explain", "baseline", "1")
+    assert code == EXIT_BAD_PARAMS
+
+
+def test_api_explains_a_comparison(data: str) -> None:
+    from fastapi.testclient import TestClient
+
+    from alpha.api import create_app
+
+    with TestClient(create_app(Path(data))) as client:
+        r = client.get("/comparisons/explanation", params={"a": 1, "b": 2})
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["topic"] == "comparison" and body["source"] == "template"
+        assert any(s["caveat"] for s in body["statements"])
+        missing = client.get("/comparisons/explanation", params={"a": 1, "b": 99})
+        assert missing.status_code == 404

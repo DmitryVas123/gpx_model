@@ -16,7 +16,12 @@ from alpha.api.context import (
     require_dataset,
 )
 from alpha.api.errors import ERROR_RESPONSES, invalid_params
-from alpha.api.reports import baseline_json, scenarios_json, stored_elevation_json
+from alpha.api.reports import (
+    baseline_json,
+    comparison_json,
+    scenarios_json,
+    stored_elevation_json,
+)
 from alpha.dem import DEFAULT_DATASET
 from alpha.domain.scenarios import din_assumptions
 from alpha.explain import explain
@@ -99,3 +104,22 @@ def baseline_explanation(
 ) -> dict[str, Any]:
     report = baseline_json(ws, params, baseline_params(effort))
     return _explained(context, "baseline", report, llm, language)
+
+
+@router.get(
+    "/comparisons/explanation",
+    response_model=schemas.Explanation,
+    responses=ERROR_RESPONSES,
+    summary="Plain-language explanation of track b against track a",
+)
+def comparison_explanation(
+    a: int,
+    b: int,
+    context: ContextDep,
+    ws: WorkspaceDep,
+    params: ParamsDep,
+    llm: bool = False,
+    language: str = "English",
+) -> dict[str, Any]:
+    report = comparison_json(ws, a, b, params)
+    return _explained(context, "comparison", report, llm, language)

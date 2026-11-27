@@ -4,6 +4,7 @@
     python scripts/eval_explain.py --templates   # ALPHA's templates must pass
     python scripts/eval_explain.py --live        # real model: acceptance, latency,
                                                  # and prompt-injection probes
+    python scripts/eval_explain.py --live --language German
 
 Runs on the data in data/local (or --data-dir). --live needs Ollama with the
 model (--model, default llama3.1:8b). Nothing leaves the computer. This is a
@@ -17,6 +18,7 @@ import sys
 import time
 from collections import Counter
 from collections.abc import Callable
+from itertools import pairwise
 from pathlib import Path
 from typing import Any
 
@@ -26,7 +28,7 @@ sys.path.insert(0, str(ROOT))
 from tests.explain_attacks import ATTACKS  # noqa: E402
 
 from alpha.cli import main  # noqa: E402
-from alpha.explain import SYSTEM_PROMPT, explain  # noqa: E402
+from alpha.explain import LANGUAGES, SYSTEM_PROMPT, explain  # noqa: E402
 from alpha.explain.explain import _user_prompt  # noqa: E402
 from alpha.explain.guards import content_problems  # noqa: E402
 from alpha.explain.validate import FORBIDDEN  # noqa: E402
@@ -63,6 +65,11 @@ def reports(data_dir: Path) -> list[tuple[str, str, dict[str, Any]]]:
             args = ["enrich", track_id, "--offline", "--dataset", dataset]
             if (r := report(data_dir, *args)) is not None:
                 found.append((f"#{track_id} elevation {dataset}", "elevation", r))
+    numeric = [int(i) for i in ids if i.isdigit()]
+    for a, b in pairwise(numeric):  # neighbours, both ways
+        for x, y in ((a, b), (b, a)):
+            if (r := report(data_dir, "compare", str(x), str(y))) is not None:
+                found.append((f"#{y} vs #{x} comparison", "comparison", r))
     if (r := report(data_dir, "baseline")) is not None:
         found.append(("baseline", "baseline", r))
     return found
@@ -77,11 +84,12 @@ def run_attacks(items: list[tuple[str, str, dict[str, Any]]]) -> None:
     total: Counter[str] = Counter()
     misses: list[str] = []
     for label, topic, rep in items:
-        if topic != "scenarios":
+        attacks = [a for a in ATTACKS if a.topic == topic]
+        if not attacks:
             continue
         template = explain(topic, rep)
         assert template.facts is not None
-        for attack in ATTACKS:
+        for attack in attacks:
             try:
                 bad = attack.build(template.statements, template.facts)
             except (LookupError, KeyError):
@@ -91,7 +99,7 @@ def run_attacks(items: list[tuple[str, str, dict[str, Any]]]) -> None:
             if result.source == "model":
                 accepted[attack.category] += 1
                 misses.append(f"{label}: {attack.id}")
-    print("False acceptance by category (attacks on your scenario reports):")
+    print("False acceptance by category (attacks on scenario and comparison reports):")
     for cat in total:
         print(f"  {cat:18} {accepted[cat]:3}/{total[cat]:3}")
     n, k = sum(total.values()), sum(accepted.values())
@@ -122,14 +130,16 @@ INJECTIONS = (
 )
 
 
-def run_live(items: list[tuple[str, str, dict[str, Any]]], model: str) -> None:
+def run_live(
+    items: list[tuple[str, str, dict[str, Any]]], model: str, language: str
+) -> None:
     rewriter = OllamaRewriter(model)
     reasons: Counter[str] = Counter()
     accepted = 0
     started = time.perf_counter()
     for label, topic, rep in items:
         t = time.perf_counter()
-        result = explain(topic, rep, rewriter, model=model)
+        result = explain(topic, rep, rewriter, model=model, language=language)
         ok = result.source == "model"
         accepted += ok
         for r in result.fallback_reasons:
@@ -184,6 +194,7 @@ def cli() -> None:
     parser.add_argument("--templates", action="store_true")
     parser.add_argument("--live", action="store_true")
     parser.add_argument("--model", default=DEFAULT_MODEL)
+    parser.add_argument("--language", choices=LANGUAGES, default="English")
     args = parser.parse_args()
     items = reports(args.data_dir)
     print(f"{len(items)} reports from {args.data_dir}\n")
@@ -192,7 +203,7 @@ def cli() -> None:
     if args.attacks or not (args.templates or args.live):
         run_attacks(items)
     if args.live:
-        run_live(items, args.model)
+        run_live(items, args.model, args.language)
 
 
 if __name__ == "__main__":

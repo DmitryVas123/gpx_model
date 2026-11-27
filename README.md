@@ -159,6 +159,7 @@ CC BY 4.0.
 alpha explain scenarios 1 --personal   # templates: instant, exact, no model needed
 alpha explain elevation 3 --dataset BY_DGM1
 alpha explain baseline
+alpha explain comparison 1 3           # track 3 against track 1
 alpha explain baseline --llm           # reworded by a local model; every number checked
 ```
 
@@ -202,7 +203,7 @@ The page can:
 -   estimate durations with standard or personal speeds;
 -   show the terrain-model check, adding terrain data after a
     confirmation;
--   explain results.
+-   explain results, including a comparison.
 
 It loads nothing from the internet. The API has no authentication, so
 keep it on `127.0.0.1`.

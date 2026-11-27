@@ -787,9 +787,15 @@ are not part of `params_hash`. The baseline is fitted with the same
     (a fixed qualification, never sent to a model and shown verbatim).
 -   `explain(topic, report, rewrite=None, model=None, language="English")
     -> Explanation`:
-    -   `topic` is `scenarios`, `elevation`, or `baseline`;
-    -   `report` is the JSON of `alpha scenarios`, `alpha enrich`, or
-        `alpha baseline` (`--json`).
+    -   `topic` is `scenarios`, `elevation`, `baseline`, or `comparison`;
+    -   `report` is the JSON of `alpha scenarios`, `alpha enrich`,
+        `alpha baseline`, or `alpha compare A B` (`--json`).
+-   Comparison facts: `a.*` / `b.*` (each track's distance, ascent,
+    descent, highest point, moving time, largest gradient-band
+    difference, steepest climb), `diff.*` (absolute difference) with
+    `dir.*` (`longer`/`shorter`, `more`/`less`, `higher`/`lower`), and
+    the track IDs as text. The report's `notes` become caveats. Each value
+    is written after its letter ("B 554 m, A 1192 m").
 -   `Explanation`:
     -   `topic`, `statements`;
     -   `source` (`template` | `model`), `model`;
@@ -813,7 +819,11 @@ are not part of `params_hash`. The baseline is fitted with the same
         -   no advice, suitability, conditions, certainty, links,
             markup, or instructions;
         -   "measured" / "recorded" only for observed or calculated
-            values.
+            values;
+        -   comparisons: an `a.*` / `b.*` value must follow its own
+            letter (unless the number is ambiguous), and a statement
+            citing `diff.X` must not use a word of the opposite direction
+            to `dir.X` (English and German).
 
         Words the template itself uses are allowed.
 -   `language` must be one of `LANGUAGES` (`English`, `German`): the

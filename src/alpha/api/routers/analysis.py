@@ -12,10 +12,8 @@ from alpha.api.context import (
     baseline_params,
 )
 from alpha.api.errors import ERROR_RESPONSES, invalid_params
-from alpha.api.reports import baseline_json, scenarios_json
-from alpha.application.tracks import compare_tracks
+from alpha.api.reports import baseline_json, comparison_json, scenarios_json
 from alpha.domain.scenarios import din_assumptions
-from alpha.report import comparison_report, stored_track_ref
 
 router = APIRouter(tags=["analysis"])
 
@@ -31,14 +29,7 @@ EffortQuery = Annotated[
     summary="Compare track b against track a under one parameter set",
 )
 def comparison(a: int, b: int, ws: WorkspaceDep, params: ParamsDep) -> dict[str, Any]:
-    c = compare_tracks(ws, a, b, params)
-    return comparison_report(
-        stored_track_ref(c.a.id, c.a.source_filename, c.a.planned_track_id),
-        stored_track_ref(c.b.id, c.b.source_filename, c.b.planned_track_id),
-        c.result,
-        c.dem_a,
-        c.dem_b,
-    )
+    return comparison_json(ws, a, b, params)
 
 
 @router.get(

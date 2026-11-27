@@ -312,7 +312,11 @@ def _parser() -> argparse.ArgumentParser:
     )
     sub.add_argument("topic", choices=sorted(TOPICS))
     sub.add_argument(
-        "track_id", type=int, nargs="?", help="needed for scenarios and elevation"
+        "track_ids",
+        type=int,
+        nargs="*",
+        metavar="ID",
+        help="scenarios and elevation: one track; comparison: A B",
     )
     sub.add_argument(
         "--llm",
@@ -550,6 +554,19 @@ def _show(args: argparse.Namespace, out: TextIO) -> int:
     return _with_workspace(args, out, action)
 
 
+def _comparison_json(
+    ws: Workspace, a: int, b: int, params: AnalysisParams
+) -> dict[str, Any]:
+    c = compare_tracks(ws, a, b, params)
+    return comparison_report(
+        stored_track_ref(c.a.id, c.a.source_filename, c.a.planned_track_id),
+        stored_track_ref(c.b.id, c.b.source_filename, c.b.planned_track_id),
+        c.result,
+        c.dem_a,
+        c.dem_b,
+    )
+
+
 def _compare(args: argparse.Namespace, out: TextIO) -> int:
     try:
         params = _params(args)
@@ -558,24 +575,10 @@ def _compare(args: argparse.Namespace, out: TextIO) -> int:
         return EXIT_BAD_PARAMS
 
     def action(ws: Workspace) -> int:
-        c = compare_tracks(ws, args.track_a, args.track_b, params)
         if args.json:
-            out.write(
-                to_json(
-                    comparison_report(
-                        stored_track_ref(
-                            c.a.id, c.a.source_filename, c.a.planned_track_id
-                        ),
-                        stored_track_ref(
-                            c.b.id, c.b.source_filename, c.b.planned_track_id
-                        ),
-                        c.result,
-                        c.dem_a,
-                        c.dem_b,
-                    )
-                )
-            )
+            out.write(to_json(_comparison_json(ws, args.track_a, args.track_b, params)))
             return EXIT_OK
+        c = compare_tracks(ws, args.track_a, args.track_b, params)
         render.comparison(c, out)
         return EXIT_OK
 
@@ -816,9 +819,15 @@ def _get_tiles(args: argparse.Namespace, out: TextIO) -> int:
 
 
 def _explain(args: argparse.Namespace, out: TextIO) -> int:
-    if args.topic in ("scenarios", "elevation") and args.track_id is None:
-        print(f"error: 'explain {args.topic}' needs a track ID", file=out)
+    needed = {"scenarios": 1, "elevation": 1, "comparison": 2, "baseline": 0}
+    if len(args.track_ids) != needed[args.topic]:
+        what = {0: "no track ID", 1: "one track ID", 2: "two track IDs (A B)"}
+        print(
+            f"error: 'explain {args.topic}' needs {what[needed[args.topic]]}",
+            file=out,
+        )
         return EXIT_BAD_PARAMS
+    args.track_id = args.track_ids[0] if args.track_ids else None
     try:
         params = _params(args)
         baseline_params = BaselineParams(effort=args.effort)
@@ -855,6 +864,8 @@ def _report_for(
     """The same JSON report the matching command prints with --json."""
     if args.topic == "baseline":
         return baseline_report(personal_baseline(ws, params, baseline_params))
+    if args.topic == "comparison":
+        return _comparison_json(ws, args.track_ids[0], args.track_ids[1], params)
     if args.topic == "elevation":
         view = elevation_check(ws, args.track_id, args.dataset, params)
         r = view.record

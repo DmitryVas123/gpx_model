@@ -11,16 +11,30 @@ from alpha.application.scenarios import (
     estimate_duration,
     estimate_personal,
 )
-from alpha.application.tracks import Workspace
+from alpha.application.tracks import Workspace, compare_tracks
 from alpha.domain.analysis import AnalysisParams
 from alpha.domain.scenarios import DEFAULT_SPEED_MULTIPLIERS, DinAssumptions
 from alpha.modelling import BaselineParams
 from alpha.report import (
     baseline_report,
+    comparison_report,
     elevation_check_report,
     scenario_report,
     stored_track_ref,
 )
+
+
+def comparison_json(
+    ws: Workspace, a: int, b: int, params: AnalysisParams
+) -> dict[str, Any]:
+    c = compare_tracks(ws, a, b, params)
+    return comparison_report(
+        stored_track_ref(c.a.id, c.a.source_filename, c.a.planned_track_id),
+        stored_track_ref(c.b.id, c.b.source_filename, c.b.planned_track_id),
+        c.result,
+        c.dem_a,
+        c.dem_b,
+    )
 
 
 def scenarios_json(

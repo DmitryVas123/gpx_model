@@ -17,6 +17,10 @@ DEFAULT_URL = "http://127.0.0.1:11434"
 DEFAULT_MODEL = "llama3.1:8b"
 LOOPBACK = ("127.0.0.1", "localhost", "::1")
 TIMEOUT_S = 180.0
+# How long Ollama keeps the model loaded after a request. Loading takes
+# several seconds; keeping it avoids that delay for the next explanation
+# and frees the GPU memory again afterwards.
+KEEP_ALIVE = "15m"
 MAX_ANSWER_BYTES = 256 * 1024
 
 # Structured output: Ollama constrains the answer to this JSON schema.
@@ -52,6 +56,7 @@ class OllamaRewriter:
         base_url: str = DEFAULT_URL,
         timeout_s: float = TIMEOUT_S,
         cpu_only: bool = False,
+        keep_alive: str = KEEP_ALIVE,
     ) -> None:
         parts = urlsplit(base_url)
         if parts.scheme != "http" or parts.hostname not in LOOPBACK:
@@ -63,6 +68,7 @@ class OllamaRewriter:
         self.url = base_url.rstrip("/") + "/api/chat"
         self.timeout_s = timeout_s
         self.cpu_only = cpu_only
+        self.keep_alive = keep_alive
         self.notes: list[str] = []  # e.g. that the GPU failed and the CPU was used
 
     def __call__(self, system: str, user: str) -> str:
@@ -91,6 +97,7 @@ class OllamaRewriter:
                     {"role": "user", "content": user},
                 ],
                 "stream": False,
+                "keep_alive": self.keep_alive,
                 "format": ANSWER_SCHEMA,
                 "options": options,
             }

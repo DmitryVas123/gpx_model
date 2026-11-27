@@ -20,7 +20,7 @@
 | 5 API and minimal UI | ✅ | FastAPI, error format, request log, local page, `alpha serve` (**MVP complete**) | 011 |
 | 6 Terrain enrichment | ✅ | Copernicus GLO-30 and Bavaria DGM1, analysis on DEM elevation, elevation check, drift warning, terrain slope | 012–015 |
 | 7 Personal performance baseline | ✅ | `alpha.modelling`: speed multiplier and flat/vertical factors, route-grouped validation, effort annotation, `--personal` scenarios | 016–019 |
-| 8 AI explanation layer | ✅ | Template explanations; local Ollama model rewording with validation; CLI, API, page | 020 |
+| 8 AI explanation layer | ✅ | Template explanations (scenarios, elevation, baseline, comparison); local Ollama model rewording with validation, English and German; CLI, API, page | 020 |
 | 9 Platform | not started | Map UI, background work, deployment: only when use justifies it | — |
 
 Versions: algorithm `0.3.0`, report format `12`, database schema `4`.
@@ -60,10 +60,9 @@ models (ADR-021).
 
 ### Optional improvements
 
--   Explanations for plan-vs-activity comparison and track analysis,
-    using the same pattern: facts, template, caveats (ADR-020).
--   German explanations tried with the real model, and Ollama
-    `keep_alive` to avoid the load delay on the first request.
+-   An explanation of a single track's analysis, using the same pattern
+    as the comparison (ADR-020). The comparison covers the most common
+    question, "how does this differ from that?".
 -   Revisit provisional thresholds as data grows:
     -   drift 20 m (ADR-014);
     -   baseline gates of 5 and 8 routes (ADR-016, ADR-017);

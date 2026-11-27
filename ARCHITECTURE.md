@@ -251,6 +251,7 @@ if transparent models stop being enough), PostGIS, and a map UI
 | `GET /tracks/{id}/dem/{dataset}` | Elevation check from the stored profile (no network) |
 | `GET /tracks/{id}/explanation?topic=scenarios\|elevation` | Plain-language explanation; `llm=true` rewords locally |
 | `GET /baseline/explanation` | The same for the personal speeds |
+| `GET /comparisons/explanation?a=&b=` | The same for a comparison of b against a |
 
 -   **Analysis options:** `profile_bin_m`, `ascent_threshold_m`,
     `distance_min_step_m`, `moving_min_speed_m_s`, `moving_window_s`,
